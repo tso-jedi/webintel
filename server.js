@@ -276,26 +276,38 @@ async function synthesize({ query, region, domain, vendor, di }) {
     "Use web_search to research the company at the given domain, then return enrichment. Be concrete and current; prefer facts you can verify over guesses. " +
     "You are also given REAL data already pulled (SimilarWeb / BuiltWith / Hunter / DNS / domain age) - do not restate those numbers, but use them as context. " +
     "payment_risk is from a card-acquiring view: classify card-acceptance risk (Low/Medium/High/Prohibited) and flag verticals (adult, dating, iGaming/gambling, CBD, nutra, telehealth/pharma, FX/trading, crypto, AI companion). " +
-    "adverse_media: actively search for negative signals - sanctions/PEP mentions, prior card-scheme problems (MATCH/TMF listing, excessive-chargeback or fraud-monitoring programs), regulatory or licensing status, lawsuits, scam/complaint patterns, data breaches. If you find nothing, say so plainly; never fabricate findings. " +
+    "adverse_media: actively search for negative signals - sanctions/PEP mentions, prior card-scheme problems (MATCH/TMF listing, excessive-chargeback or fraud-monitoring programs), regulatory or licensing status, lawsuits, scam/complaint patterns, data breaches. If you find nothing, say so plainly; never fabricate findings. For EACH flag, include the exact source URL from your web_search results where you found it; if you are not confident of the exact URL, set url to an empty string rather than guessing - never invent a URL. " +
+    "boardability is a card-acquiring underwriting PRE-CHECK decision for Corepay. verdict must be one of: 'PRE-CHECK PASS' (clean, route to underwriting), 'CONDITIONAL' (board only with the listed conditions), 'DECLINE' (do not board), 'ESCALATE' (needs senior judgment from Head of Underwriting). conditions are concrete and specific (e.g. rolling reserve %, age-verification/2257 proof, billing-descriptor strategy, MID/segmentation structure, prohibited sub-segments, required licences). routing_note is a short FACTUAL, STRUCTURED internal note to the underwriting lead with NO marketing tone - state merchant, domain, vertical, MCC, risk class, top adverse flags, recommended conditions, and recommended next step. " +
     "Respond with ONLY valid JSON, no markdown, no fences. Keep arrays to 3-5 short items. Schema: {" +
     '"business_model":{"type":string,"monetization":string,"products":string[]},' +
     '"payment_risk":{"classification":"Low"|"Medium"|"High"|"Prohibited","mcc_guess":string,"vertical_flags":string[],"chargeback_risk":string,"rationale":string},' +
     '"corepay_fit":{"score":number,"verdict":string,"reasons":string[],"watchouts":string[]},' +
+    '"boardability":{"verdict":"PRE-CHECK PASS"|"CONDITIONAL"|"DECLINE"|"ESCALATE","rationale":string,"conditions":string[],"routing_note":string},' +
     '"outreach":{"angle":string,"possible_contacts":string[]},' +
-    '"adverse_media":{"flags":string[],"summary":string,"regulatory":string},' +
+    '"adverse_media":{"flags":[{"claim":string,"url":string}],"summary":string,"regulatory":string},' +
     '"company_fill":{"summary":string,"industry":string,"founded":string,"app_presence":string,"hq":string}}';
   const ctx = { vendor, domain_registered: di?.age?.created || null, dns: di?.dns ? { provider: nsProvider(di.dns.ns), email: mxProvider(di.dns.mx) } : null };
   const user = `Target: ${query} (domain: ${domain})` + (region ? `, focus region ${region}` : "") + `.\nContext data:\n${JSON.stringify(ctx, null, 2)}\nResearch with web_search, then return the JSON object only.`;
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: ANTHROPIC_MODEL, max_tokens: 2200, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] }),
+    body: JSON.stringify({ model: ANTHROPIC_MODEL, max_tokens: 2800, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] }),
   });
   if (!ok(r)) throw new Error(`Anthropic ${r.status}`);
   const data = await r.json();
+  // collect the REAL urls the web search actually returned (ground truth, not model-claimed)
+  const cites = [];
+  for (const b of data.content || []) {
+    if (b.type === "web_search_tool_result" && Array.isArray(b.content)) {
+      for (const x of b.content) if (x && x.url) cites.push({ title: x.title || x.url, url: x.url });
+    }
+  }
+  const seen = new Set();
+  const citations = cites.filter((c) => !seen.has(c.url) && seen.add(c.url)).slice(0, 12);
   const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
   const raw = text.replace(/```json|```/g, "").trim();
-  return JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1));
+  const parsed = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1));
+  return { data: parsed, citations };
 }
 
 // ---- assemble --------------------------------------------------------------
@@ -308,8 +320,8 @@ app.post("/api/enrich", async (req, res) => {
     const [sw, bw, hu, di] = await Promise.all([similarweb(domain), builtwith(domain), hunter(domain), domainIntel(domain)]);
     const vendor = { similarweb: sw, builtwith: bw, hunter: hu ? { company: hu.company, social: hu.social, contacts: hu.contacts } : null };
 
-    let synth = null;
-    try { synth = await synthesize({ query, region, domain, vendor, di }); } catch {}
+    let synth = null, citations = [];
+    try { const s = await synthesize({ query, region, domain, vendor, di }); if (s) { synth = s.data; citations = s.citations || []; } } catch {}
     const fill = synth?.company_fill || {};
 
     const regDate = di?.age?.created ? String(di.age.created).slice(0, 10) : null;
@@ -346,8 +358,14 @@ app.post("/api/enrich", async (req, res) => {
       },
       digital_presence: { social: hu?.social || [], app_presence: fill.app_presence || "" },
       payment_risk: synth?.payment_risk || { classification: "Medium", mcc_guess: "", vertical_flags: [], chargeback_risk: "", rationale: "" },
+      boardability: synth?.boardability || { verdict: "", rationale: "", conditions: [], routing_note: "" },
       corepay_fit: synth?.corepay_fit || { score: 0, verdict: "Not scored", reasons: [], watchouts: [] },
-      adverse_media: synth?.adverse_media || { flags: [], summary: "", regulatory: "" },
+      adverse_media: {
+        flags: Array.isArray(synth?.adverse_media?.flags) ? synth.adverse_media.flags : [],
+        summary: synth?.adverse_media?.summary || "",
+        regulatory: synth?.adverse_media?.regulatory || "",
+        sources: citations,
+      },
       outreach: {
         angle: synth?.outreach?.angle || "",
         possible_contacts: hu?.contacts && hu.contacts.length ? hu.contacts : synth?.outreach?.possible_contacts || [],
