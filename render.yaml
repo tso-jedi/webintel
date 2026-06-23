@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: merchant-intel
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      # Paste these values in the Render dashboard when prompted (sync:false = secret).
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SIMILARWEB_API_KEY
+        sync: false
+      - key: BUILTWITH_API_KEY
+        sync: false
+      - key: HUNTER_API_KEY
+        sync: false
+      # Non-secret config
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-4-6
+      - key: ALLOWED_ORIGINS
+        value: "*"
