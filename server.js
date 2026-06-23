@@ -291,7 +291,7 @@ async function synthesize({ query, region, domain, vendor, di }) {
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: ANTHROPIC_MODEL, max_tokens: 2800, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] }),
+    body: JSON.stringify({ model: ANTHROPIC_MODEL, max_tokens: 6000, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] }),
   });
   if (!ok(r)) throw new Error(`Anthropic ${r.status}`);
   const data = await r.json();
@@ -321,7 +321,8 @@ app.post("/api/enrich", async (req, res) => {
     const vendor = { similarweb: sw, builtwith: bw, hunter: hu ? { company: hu.company, social: hu.social, contacts: hu.contacts } : null };
 
     let synth = null, citations = [];
-    try { const s = await synthesize({ query, region, domain, vendor, di }); if (s) { synth = s.data; citations = s.citations || []; } } catch {}
+    try { const s = await synthesize({ query, region, domain, vendor, di }); if (s) { synth = s.data; citations = s.citations || []; } }
+    catch (e) { console.error("synthesize failed:", e.message); }
     const fill = synth?.company_fill || {};
 
     const regDate = di?.age?.created ? String(di.age.created).slice(0, 10) : null;
