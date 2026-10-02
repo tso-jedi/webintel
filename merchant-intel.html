@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Merchant Intel — Corepay / Dispu Deal Desk</title>
+<style>
+  :root{
+    --canvas:#0A1326; --panel:#0F1E38; --panelDeep:#0C1B33;
+    --line:rgba(0,154,222,0.18); --lineSoft:rgba(138,160,190,0.14);
+    --cyan:#009ADE; --cyanBright:#4CC2FF; --purple:#7F00FF;
+    --ink:#E8EEF6; --muted:#8AA0BE;
+    --amber:#F59E0B; --red:#EF4444; --orange:#F97316; --green:#22C55E; --hold:#C084FC;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--canvas);color:var(--ink);font-family:var(--sans);padding:22px 18px 60px}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{margin:0;font-size:19px;letter-spacing:3px;font-weight:700;font-family:var(--mono)}
+  .sub{margin:6px 0 0 19px;font-size:12px;color:var(--muted)}
+  .corner{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1.5px;text-align:right}
+  .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px}
+  .dot{width:9px;height:9px;border-radius:2px;background:var(--cyan);box-shadow:0 0 12px var(--cyan)}
+  .bar{background:var(--panelDeep);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .bar .prompt{font-family:var(--mono);color:var(--cyan);font-size:14px}
+  input,select{outline:none}
+  #q{flex:1 1 260px;background:transparent;border:none;color:var(--ink);font-family:var(--mono);font-size:14px;padding:8px 4px}
+  #q::placeholder{color:var(--muted)}
+  select{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:12px}
+  button{cursor:pointer;font-family:var(--mono)}
+  #gear{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:9px 12px;font-size:13px}
+  #gear.on{border-color:var(--cyan);color:var(--cyan)}
+  #run{background:var(--cyan);color:var(--canvas);border:none;border-radius:8px;padding:9px 18px;font-size:12px;font-weight:700;letter-spacing:1px}
+  #run:disabled{opacity:.5;cursor:not-allowed}
+  .settings{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:10px;display:none}
+  .settings.open{display:block}
+  .lbl{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1px;margin-bottom:8px}
+  .settings input{width:100%;background:var(--canvas);border:1px solid var(--line);border-radius:8px;color:var(--ink);font-family:var(--mono);font-size:13px;padding:9px 11px;margin-bottom:10px}
+  .hist{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px;align-items:center}
+  .hist .t{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1px}
+  .chip-btn{background:transparent;border:1px solid var(--lineSoft);color:var(--muted);border-radius:6px;padding:4px 9px;font-size:11px}
+  .chip-btn:hover{border-color:var(--cyan);color:var(--ink)}
+  .scan{margin-top:22px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px;position:relative;overflow:hidden}
+  .sweep{position:absolute;top:0;left:0;height:2px;width:40%;background:linear-gradient(90deg,transparent,var(--cyanBright),transparent);animation:sweep 1.4s linear infinite}
+  @keyframes sweep{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+  @keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
+  .err{margin-top:22px;background:rgba(239,68,68,.08);border:1px solid var(--red);border-radius:14px;padding:18px;font-family:var(--mono);font-size:13px}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+  .badge{font-family:var(--mono);font-size:10px;letter-spacing:1px;border-radius:6px;padding:4px 9px}
+  .tbtn{background:transparent;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 13px;font-size:11px;letter-spacing:.5px}
+  .tbtn:hover{border-color:var(--cyan)}
+  .verdict{background:var(--panelDeep);border:1px solid var(--line);border-radius:14px;padding:18px;display:flex;flex-wrap:wrap;gap:20px;align-items:center;justify-content:space-between}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:14px;margin-top:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;position:relative;overflow:hidden}
+  .card .accent{position:absolute;left:0;top:0;bottom:0;width:3px}
+  .card h3{margin:0 0 12px;font-family:var(--mono);font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:var(--muted);font-weight:600;display:flex;justify-content:space-between;align-items:baseline}
+  .card h3 .tag{font-size:10px;letter-spacing:1px}
+  .row{display:flex;gap:12px;padding:5px 0;border-bottom:1px solid var(--lineSoft)}
+  .row .k{font-family:var(--mono);font-size:11px;color:var(--muted);min-width:92px;letter-spacing:.5px}
+  .row .v{font-size:13px;color:var(--ink);line-height:1.5}
+  .row .v.mono{font-family:var(--mono)}
+  .grp{margin-top:12px}
+  .gl,.grp .gl{font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:7px;letter-spacing:1px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chips span{font-family:var(--mono);font-size:11px;background:rgba(0,154,222,.08);border:1px solid var(--line);border-radius:6px;padding:3px 8px}
+  .bul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px}
+  .bul li{display:flex;gap:9px;font-size:13px;line-height:1.45}
+  .bul li b{margin-top:6px;font-size:8px}
+  .summary{margin:12px 0 0;font-size:13px;line-height:1.55}
+  .sources{margin-top:14px;display:flex;flex-wrap:wrap;gap:7px;align-items:center;font-family:var(--mono);font-size:11px}
+  .disc{margin:34px auto 0;font-size:11px;color:var(--muted);line-height:1.6;text-align:center;max-width:720px}
+  .idle{margin-top:40px;text-align:center;color:var(--muted)}
+  /* print */
+  #print{display:none}
+  @media print{
+    body{background:#fff;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    #app{display:none!important}
+    #print{display:block!important;color:#1a2436;font-family:var(--sans);padding:10px 6px}
+    #print .ph{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #0C1B33;padding-bottom:8px}
+    #print .sec{font-family:var(--mono);font-size:10px;letter-spacing:1.5px;color:#0C1B33;text-transform:uppercase;border-bottom:2px solid #009ADE;padding:0 0 4px;margin:18px 0 8px}
+    #print .meta{font-family:var(--mono);font-size:11px;color:#445}
+    #print .pill{font-family:var(--mono);font-size:12px;font-weight:700;border-radius:6px;padding:5px 12px;display:inline-block}
+  }
+  /* v3: application context, gates, checks */
+  input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--cyanBright);outline-offset:2px}
+  #ctxBtn{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:9px 12px;font-size:11px;letter-spacing:1px}
+  #ctxBtn.on{border-color:var(--amber);color:var(--amber)}
+  .ctx{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:10px;display:none}
+  .ctx.open{display:block}
+  .ctxgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px 12px}
+  .ctxgrid label{display:flex;flex-direction:column;gap:5px;font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1px}
+  .ctxgrid input,.ctxgrid select,.ctxgrid textarea{background:var(--canvas);border:1px solid var(--line);border-radius:8px;color:var(--ink);font-family:var(--sans);font-size:13px;padding:8px 10px;width:100%;letter-spacing:0}
+  .ctxgrid textarea{resize:vertical;min-height:52px}
+  .ctxgrid .wide{grid-column:1/-1}
+  .sev{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.5px;border-radius:5px;padding:2px 7px;white-space:nowrap;border:1px solid;display:inline-block}
+  .mmtab{width:100%;border-collapse:collapse;font-size:12.5px}
+  .mmtab th{font-family:var(--mono);font-size:10px;letter-spacing:1px;color:var(--muted);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-weight:600}
+  .mmtab td{padding:8px;border-bottom:1px solid var(--lineSoft);vertical-align:top;line-height:1.45}
+  .gate{display:flex;gap:12px;align-items:flex-start;border-radius:10px;padding:10px 14px;flex-wrap:wrap}
+  .subj{padding:10px 0;border-bottom:1px solid var(--lineSoft)}
+  .subj:last-child{border-bottom:none}
+  details.why summary{cursor:pointer;color:var(--muted);font-family:var(--mono);font-size:11px}
+  details.why ul{margin:8px 0 0;padding-left:18px;color:var(--ink);font-size:12px;line-height:1.6}
+  @media (max-width:640px){ .mmtab thead{display:none} .mmtab td{display:block;border-bottom:none;padding:3px 0} .mmtab tr{display:block;border-bottom:1px solid var(--lineSoft);padding:8px 0} .mmtab td[data-l]::before{content:attr(data-l);display:block;font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--muted);margin-top:4px} }
+  .modetabs{display:flex;gap:0;margin-top:14px;border-bottom:1px solid var(--line)}
+  .modetab{background:transparent;border:none;color:var(--muted);font-family:var(--mono);font-size:11px;letter-spacing:1.5px;padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .modetab.on{color:var(--cyan);border-bottom-color:var(--cyan)}
+  .btab{width:100%;border-collapse:collapse;font-size:12px}
+  .btab th{font-family:var(--mono);font-size:10px;letter-spacing:1px;color:var(--muted);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;user-select:none;white-space:nowrap}
+  .btab th:hover{color:var(--ink)}
+  .btab td{padding:9px 10px;border-bottom:1px solid var(--lineSoft);vertical-align:top}
+  .btab tr.brow:hover{background:rgba(0,154,222,0.05);cursor:pointer}
+  .bpill{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.5px;border-radius:5px;padding:2px 7px;white-space:nowrap}
+  .bdom{font-family:var(--mono);color:var(--cyanBright)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="wrap">
+    <div class="head">
+      <div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="dot"></div>
+          <h1>MERCHANT<span style="color:var(--cyan)">·</span>INTEL</h1>
+        </div>
+        <p class="sub">Lead enrichment &amp; website intel · card-acceptance risk lens</p>
+      </div>
+      <span class="corner">COREPAY / DISPU<br>DEAL DESK</span>
+    </div>
+
+    <div class="bar">
+      <span class="prompt">›</span>
+      <input id="q" placeholder="domain or company  (e.g. spicestars.ai, IVIM Health)" />
+      <select id="region">
+        <option value="">Any region</option>
+        <option>EU</option><option>US</option><option>UK</option><option>AU</option><option>LATAM</option>
+      </select>
+      <button id="ctxBtn" title="Application context" aria-expanded="false" aria-controls="ctx">APPLICATION</button>
+      <button id="gear" title="Settings" aria-label="Settings">⚙</button>
+      <button id="run">RUN SCAN</button>
+    </div>
+
+    <div class="settings" id="settings">
+      <div class="lbl">BACKEND URL — point at your enrichment server for live SimilarWeb / BuiltWith / Hunter data</div>
+      <input id="apiBase" placeholder="https://your-backend.onrender.com   (blank = estimate mode)" />
+      <div class="lbl">DEAL DESK TOKEN — only if the backend has DEAL_DESK_TOKEN set; saved on this computer with the backend URL</div>
+      <input id="ddToken" type="password" placeholder="(optional)" autocomplete="off" />
+      <div class="lbl">ANTHROPIC API KEY — only needed for estimate mode in this local file; stays in this tab, sent only to Anthropic</div>
+      <input id="anthKey" type="password" placeholder="sk-ant-...   (optional)" />
+      <div style="font-size:11px;color:var(--muted)">Mode: <span id="modeTxt" style="font-family:var(--mono)"></span></div>
+    </div>
+
+    <div class="ctx" id="ctx">
+      <div class="lbl">APPLICATION CONTEXT — what the merchant declared on the precheck. The scan checks it against the website, the registry and public records. Live mode only.</div>
+      <div class="ctxgrid">
+        <label>LEGAL ENTITY<input id="c_legal" placeholder="Example Holdings, LLC" /></label>
+        <label>STATE / COUNTRY<input id="c_state" placeholder="FL" /></label>
+        <label>INCORPORATED<input id="c_inc" placeholder="2024-04-04" /></label>
+        <label>DECLARED BUSINESS<input id="c_vertical" placeholder="Travel membership" /></label>
+        <label>AVG TICKET (USD)<input id="c_ticket" inputmode="decimal" placeholder="140" /></label>
+        <label>MONTHLY VOLUME (USD)<input id="c_volume" inputmode="decimal" placeholder="140000" /></label>
+        <label>MONTHLY TRANSACTIONS<input id="c_txns" inputmode="numeric" placeholder="1000" /></label>
+        <label>PREVIOUSLY ACCEPTED CARDS<select id="c_history"><option value="">Not stated</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+        <label>CURRENT PROCESSOR<input id="c_proc" /></label>
+        <label>CURRENT MCC<input id="c_mcc" placeholder="4-digit code" /></label>
+        <label class="wide">REFERRED BY — partner name; hides direct outreach<input id="c_ref" /></label>
+        <label class="wide">PRINCIPALS — separate with ;<input id="c_principals" placeholder="Jane Doe; John Doe" /></label>
+        <label class="wide">LINKED COMPANIES TO SCREEN — prior employers or affiliated businesses, separate with ;<input id="c_linked" placeholder="Previous Co; Affiliated Co" /></label>
+        <label class="wide">NOTES<textarea id="c_notes" rows="2"></textarea></label>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+        <button class="tbtn" id="ctxClear" type="button">Clear context</button>
+        <span id="ctxState" style="font-size:12px;color:var(--muted)"></span>
+      </div>
+    </div>
+
+    <div class="modetabs">
+      <button id="tabSingle" class="modetab on" onclick="window.MI.tab('single')">SINGLE</button>
+      <button id="tabBatch" class="modetab" onclick="window.MI.tab('batch')">BATCH</button>
+    </div>
+
+    <div id="batchPanel" style="display:none">
+      <div class="bar" style="flex-direction:column;align-items:stretch;gap:10px">
+        <div class="lbl" style="margin:0">PASTE DOMAINS — one per line (or comma / space separated). Scanned sequentially; best leads float to the top.</div>
+        <textarea id="batchInput" placeholder="ivimhealth.com&#10;candy.ai&#10;spicestars.ai&#10;..." style="width:100%;min-height:96px;box-sizing:border-box;background:var(--canvas);border:1px solid var(--line);border-radius:8px;color:var(--ink);font-family:var(--mono);font-size:13px;padding:10px;outline:none;resize:vertical"></textarea>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <button id="runBatch" onclick="window.MI.batch()" style="background:var(--cyan);color:var(--canvas);border:none;border-radius:8px;padding:9px 18px;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:1px">RUN BATCH</button>
+          <button id="stopBatch" onclick="window.MI.stop()" style="display:none;background:transparent;border:1px solid var(--red);color:var(--red);border-radius:8px;padding:9px 14px;font-family:var(--mono);font-size:12px">STOP</button>
+          <button class="tbtn" onclick="window.MI.batchCSV()" style="background:transparent;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:9px 13px;font-family:var(--mono);font-size:11px">↧ CSV</button>
+          <span id="batchProg" style="font-family:var(--mono);font-size:11px;color:var(--muted)"></span>
+        </div>
+      </div>
+      <div id="batchOut" style="margin-top:14px"></div>
+    </div>
+
+    <div class="hist" id="hist" style="display:none"></div>
+
+    <div id="out"></div>
+
+    <p class="disc" id="disc"></p>
+  </div>
+</div>
+
+<div id="print"></div>
+
+<script>
+(function(){
+  const $ = (id)=>document.getElementById(id);
+  const RISK = {
+    Low:{c:'#22C55E',label:'LOW RISK'}, Medium:{c:'#F59E0B',label:'MEDIUM RISK'},
+    High:{c:'#F97316',label:'HIGH RISK'}, Prohibited:{c:'#EF4444',label:'PROHIBITED'}
+  };
+  const C = getComputedStyle(document.documentElement);
+  const v = (n)=>C.getPropertyValue(n).trim();
+  const BOARD = {'PRE-CHECK PASS':'var(--green)','CONDITIONAL':'var(--amber)','DECLINE':'var(--red)','ESCALATE':'var(--orange)','HOLD':'var(--hold)'};
+  const SEV = {high:'var(--red)',medium:'var(--amber)',low:'var(--muted)'};
+  const CTX_FIELDS = {c_legal:'legal_name',c_state:'entity_state',c_inc:'incorporation_date',c_vertical:'declared_vertical',c_ticket:'avg_ticket',c_volume:'monthly_volume',c_txns:'monthly_txn_count',c_history:'previously_accepted_cards',c_proc:'current_processor',c_mcc:'current_mcc',c_ref:'referral_partner',c_principals:'principals',c_linked:'linked_companies',c_notes:'notes'};
+  const store = { get:(k)=>{ try{ return localStorage.getItem(k)||''; }catch(e){ return ''; } }, set:(k,v)=>{ try{ v?localStorage.setItem(k,v):localStorage.removeItem(k); }catch(e){} } };
+  const SCAN_STEPS = ["resolving domain & entity","checking the website is live","comparing application with what is observed","verifying legal entity in registry","screening principals & linked companies","classifying industry / vertical","reading business model & monetization","scanning traffic & geo signals","fingerprinting tech stack","mapping social & app footprint","assessing card-acceptance risk","scoring Corepay / Dispu fit","compiling sources"];
+
+  const state = { report:null, source:'estimate', history:[], scanning:false, batch:[], batchRunning:false, batchStop:false, batchSort:'fit' };
+
+  const esc = (s)=>String(s==null?'':s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+
+  // ---- data paths ----
+  async function enrichBackend(base, query, region, application, refresh){
+    const headers={'Content-Type':'application/json'}; const tok=$('ddToken').value.trim(); if(tok) headers['x-deal-desk-token']=tok;
+    const body={query,region}; if(application) body.application=application; if(refresh) body.refresh=true;
+    const r = await fetch(base.replace(/\/$/,'')+'/api/enrich',{method:'POST',headers,body:JSON.stringify(body)});
+    if(r.status===401) throw new Error('The backend requires a Deal Desk token. Add it in ⚙ settings.');
+    if(!r.ok){ let m=''; try{ m=(await r.json()).error||''; }catch(e){} throw new Error('Backend returned '+r.status+(m?': '+m:'')); }
+    const j = await r.json(); if(j.error) throw new Error(j.error); return j;
+  }
+  async function enrichAI(key, query, region){
+    const sys = "You are a merchant-intelligence analyst for a high-risk payment service provider (Corepay, a global PSP, and Dispu, its chargeback/dispute platform). Given a company name or website domain, use web_search to research it, then return a single JSON object enriching the lead. Be concrete and current. Where a metric (traffic, employees) cannot be known precisely, give an estimated TIER or RANGE and never invent exact figures. The payment_risk lens is from a card-acquiring perspective: classify card-acceptance risk and flag verticals like adult, dating, iGaming/gambling, CBD, nutra, telehealth/pharma, FX/trading, crypto, AI companion. Respond with ONLY valid JSON, no markdown, no code fences. Keep every array to 3-5 short items. Schema: {\"company\":{\"name\":string,\"domain\":string,\"hq\":string,\"founded\":string,\"summary\":string,\"industry\":string,\"employees_estimate\":string},\"business_model\":{\"type\":string,\"monetization\":string,\"products\":string[]},\"web_intel\":{\"traffic_tier\":string,\"monthly_visits_estimate\":string,\"top_geographies\":string[],\"primary_channels\":string[],\"tech_signals\":string[],\"notable\":string},\"digital_presence\":{\"social\":string[],\"app_presence\":string},\"payment_risk\":{\"classification\":\"Low\"|\"Medium\"|\"High\"|\"Prohibited\",\"mcc_guess\":string,\"vertical_flags\":string[],\"chargeback_risk\":string,\"rationale\":string},\"corepay_fit\":{\"score\":number,\"verdict\":string,\"reasons\":string[],\"watchouts\":string[]},\"outreach\":{\"angle\":string,\"possible_contacts\":string[]},\"sources\":string[],\"confidence\":\"low\"|\"medium\"|\"high\"}";
+    const user = "Research and enrich this lead: "+query+(region?" (focus region: "+region+")":"")+". Return the JSON object only.";
+    const r = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:4000,system:sys,messages:[{role:"user",content:user}],tools:[{type:"web_search_20250305",name:"web_search"}]})});
+    if(!r.ok) throw new Error('Anthropic '+r.status);
+    const data = await r.json();
+    const text = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+    let raw = text.replace(/```json|```/g,'').trim();
+    const a=raw.indexOf('{'), b=raw.lastIndexOf('}'); if(a<0||b<0) throw new Error('No structured data returned');
+    return JSON.parse(raw.slice(a,b+1));
+  }
+
+  // ---- render helpers ----
+  const chips = (arr)=> (arr&&arr.length)? '<div class="chips">'+arr.map(x=>'<span style="color:var(--cyanBright)">'+esc(x)+'</span>').join('')+'</div>' : '<span style="color:var(--muted);font-size:12px">—</span>';
+  const chipsC = (arr,col)=> (arr&&arr.length)? '<div class="chips">'+arr.map(x=>'<span style="color:'+col+'">'+esc(x)+'</span>').join('')+'</div>' : '<span style="color:var(--muted);font-size:12px">—</span>';
+  const bullets = (arr,col)=> (arr&&arr.length)? '<ul class="bul">'+arr.map(x=>'<li><b style="color:'+col+'">●</b><span>'+esc(x)+'</span></li>').join('')+'</ul>' : '<span style="color:var(--muted);font-size:12px">—</span>';
+  const row = (k,val,mono)=> val? '<div class="row"><span class="k">'+esc(k)+'</span><span class="v'+(mono?' mono':'')+'">'+esc(val)+'</span></div>':'';
+  const sevPill = (s)=>{ const c=SEV[s]||'var(--muted)'; return '<span class="sev" style="color:'+c+';border-color:'+c+'">'+esc(String(s||'').toUpperCase()||'—')+'</span>'; };
+  const link = (url,text)=> url? '<a href="'+esc(url)+'" target="_blank" rel="noopener" style="color:var(--cyanBright);text-decoration:underline">'+esc(text)+' ↗</a>' : esc(text);
+  const advFlags = (arr)=>{
+    if(!arr||!arr.length) return '<span style="color:var(--muted);font-size:12px">None tied to this merchant, its principals or linked companies.</span>';
+    return '<ul class="bul">'+arr.map(f=>{ const claim=(f&&f.claim)||f; const url=f&&f.url; const col=SEV[f&&f.severity]||'var(--amber)';
+      const noSrc = f && f.url_verified===false ? ' <span style="color:var(--muted);font-size:11px">(no verified source link)</span>' : '';
+      return '<li><b style="color:'+col+'">●</b><span>'+link(url,claim)+noSrc+'</span></li>'; }).join('')+'</ul>';
+  };
+  const srcList = (arr)=>{
+    if(!arr||!arr.length) return '';
+    return '<div class="grp"><div class="gl">SOURCES SEEN ('+arr.length+')</div><div style="display:flex;flex-direction:column;gap:4px">'+
+      arr.map(s=>'<a href="'+esc(s.url)+'" target="_blank" rel="noopener" style="color:var(--cyanBright);font-size:12px;text-decoration:none">↗ '+esc(String(s.title||s.url).slice(0,90))+'</a>').join('')+'</div></div>';
+  };
+  const gatesBlock = (r)=>{
+    const g=r.gates||[]; if(!g.length) return '';
+    return '<div style="margin-top:14px;display:flex;flex-direction:column;gap:8px" role="list" aria-label="Deal Desk gates">'+g.map(x=>{
+      const blk=x.level==='blocking'; const col=blk?'var(--red)':'var(--amber)';
+      return '<div class="gate" role="listitem" style="background:'+(blk?'rgba(239,68,68,.08)':'rgba(245,158,11,.06)')+';border:1px solid '+col+'">'+
+        '<span class="sev" style="color:'+col+';border-color:'+col+'">'+(blk?'BLOCKING':'REQUIRED')+'</span>'+
+        '<span style="font-size:13px;line-height:1.5;flex:1 1 320px">'+esc(x.message)+'</span>'+
+        '<span style="font-family:var(--mono);font-size:10px;color:var(--muted)">'+esc(x.code)+'</span></div>';
+    }).join('')+'</div>';
+  };
+  const money = (n)=> (n==null||n==='')?'':'$'+Number(n).toLocaleString('en-US');
+  const consistencyCard = (r)=>{
+    if(!(r._meta&&r._meta.version)) return '';
+    const a=r.application, mm=(r.consistency&&r.consistency.mismatches)||[];
+    if(!a){
+      return '<div style="grid-column:1/-1">'+card('Declared vs observed','var(--muted)','DOMAIN-ONLY SCAN',
+        '<p class="summary" style="margin-top:0;color:var(--muted)">No application context was sent, so nothing the merchant declared was checked. Open APPLICATION next to the search bar, fill in the precheck details and scan again.</p>')+'</div>';
+    }
+    const hi=mm.some(x=>x.severity==='high');
+    const declared = [a.declared_vertical, a.monthly_volume!=null&&money(a.monthly_volume)+'/mo', a.monthly_txn_count!=null&&Number(a.monthly_txn_count).toLocaleString('en-US')+' txns/mo', a.avg_ticket!=null&&money(a.avg_ticket)+' avg ticket', a.previously_accepted_cards===true&&'previously accepted cards', a.current_processor&&'processor: '+a.current_processor].filter(Boolean);
+    const table = mm.length
+      ? '<table class="mmtab"><thead><tr><th>CHECK</th><th>DECLARED</th><th>OBSERVED</th><th>SEVERITY</th></tr></thead><tbody>'+
+          mm.map(x=>'<tr><td style="font-family:var(--mono);font-size:11px;color:var(--muted)">'+esc(String(x.field).replace(/_/g,' '))+'</td><td data-l="DECLARED">'+esc(x.declared)+'</td><td data-l="OBSERVED">'+esc(x.observed)+(x.note?'<div style="color:var(--muted);font-size:11.5px;margin-top:3px">'+esc(x.note)+'</div>':'')+'</td><td>'+sevPill(x.severity)+'</td></tr>').join('')+'</tbody></table>'
+      : '<p class="summary" style="margin-top:0;color:var(--green)">No inconsistencies found between the application and what was observed.</p>';
+    return '<div style="grid-column:1/-1">'+card('Declared vs observed',hi?'var(--red)':mm.length?'var(--amber)':'var(--green)',mm.length?mm.length+' MISMATCH'+(mm.length>1?'ES':''):'CONSISTENT',
+      (declared.length?'<div class="grp" style="margin-top:0"><div class="gl">DECLARED ON APPLICATION</div>'+chips(declared)+'</div>':'')+
+      ((a.principals&&a.principals.length)||a.referral_partner?'<div class="grp">'+row('principals',(a.principals||[]).join(', '))+row('referred by',a.referral_partner)+'</div>':'')+
+      '<div class="grp">'+table+'</div>'+
+      (r.consistency&&r.consistency.summary?'<p class="summary">'+esc(r.consistency.summary)+'</p>':''))+'</div>';
+  };
+  const SITE_OK = {live:'var(--green)',blocked:'var(--amber)'};
+  const siteCard = (r)=>{
+    const s=r.site_check; if(!s) return '';
+    const col=SITE_OK[s.status]||'var(--red)';
+    const pol=s.policies||{};
+    const polHtml = Object.keys(pol).length ? '<div class="chips">'+Object.keys(pol).map(k=> pol[k]
+        ? '<span style="color:var(--green)"><a href="'+esc(pol[k])+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">✓ '+esc(k)+'</a></span>'
+        : '<span style="color:var(--muted)">✕ '+esc(k)+'</span>').join('')+'</div>' : '<span style="color:var(--muted);font-size:12px">Not checked — page content unavailable.</span>';
+    const sig=s.signals||{};
+    const sigKeys=Object.keys(sig).sort((x,y)=>(sig[y].score||0)-(sig[x].score||0));
+    const sigHtml = sigKeys.length ? '<ul class="bul">'+sigKeys.map(k=>{ const v=sig[k]; const terms=(v.strong||[]).concat(v.weak||[]).slice(0,5).join(', ');
+        const c = k==='affiliate_mlm'&&(v.strong||[]).length ? 'var(--orange)' : 'var(--cyanBright)';
+        return '<li><b style="color:'+c+'">●</b><span><span style="font-family:var(--mono);font-size:12px">'+esc(k.replace(/_/g,' '))+'</span> <span style="color:var(--muted)">'+esc(terms)+'</span></span></li>'; }).join('')+'</ul>' : '<span style="color:var(--muted);font-size:12px">No content signals detected.</span>';
+    return card('Website check',col,String(s.status||'').replace(/_/g,' ').toUpperCase(),
+      row('status',String(s.status||'').replace(/_/g,' '),1)+row('http',s.http_status!=null?String(s.http_status):'',1)+row('final url',s.final_url,1)+row('title',s.title)+
+      (s.evidence?'<div class="row"><span class="k">evidence</span><span class="v" style="color:'+col+'">“'+esc(s.evidence)+'”</span></div>':'')+
+      row('platform',s.platform)+row('pages read',s.pages_scanned!=null?String(s.pages_scanned):'',1)+
+      (s.redirect_off_domain?'<div class="row"><span class="k">redirect</span><span class="v" style="color:var(--amber)">Redirects to another domain</span></div>':'')+
+      '<div class="grp"><div class="gl">POLICY LINKS ON HOMEPAGE</div>'+polHtml+'</div>'+
+      '<div class="grp"><div class="gl">CONTENT SIGNALS</div>'+sigHtml+'</div>');
+  };
+  const entityCard = (r)=>{
+    const e=r.entity_verification; if(!e) return '';
+    const ok=!!e.verified; const col=ok?'var(--green)':'var(--amber)';
+    const officers=(e.officers||[]).map(o=> typeof o==='string'?o:[o.name,o.position].filter(Boolean).join(' · '));
+    return card('Legal entity',col,ok?'VERIFIED':'NOT VERIFIED',
+      row('legal name',e.legal_name)+row('registry id',e.registry_id,1)+row('jurisdiction',e.jurisdiction,1)+row('status',e.status)+row('formed',e.formation_date,1)+
+      (e.registered_address_type&&e.registered_address_type!=='unknown'?'<div class="row"><span class="k">address type</span><span class="v" style="color:'+(e.registered_address_type==='residential'||e.registered_address_type==='virtual_office'?'var(--amber)':'var(--ink)')+'">'+esc(e.registered_address_type.replace(/_/g,' '))+'</span></div>':'')+
+      row('source',e.source)+
+      (officers.length?'<div class="grp"><div class="gl">OFFICERS / MANAGERS</div>'+chipsC(officers,'var(--ink)')+'</div>':'')+
+      (e.source_url?'<div class="grp" style="font-size:13px">'+link(e.source_url,'Open registry record')+'</div>':'')+
+      (e.note?'<p class="summary" style="color:var(--amber)">'+esc(e.note)+'</p>':'')+
+      (!ok&&!e.note?'<p class="summary" style="color:var(--muted)">Add the legal entity name and state under APPLICATION to verify it.</p>':''));
+  };
+  const screeningCard = (r)=>{
+    const list=r.principal_screening; const a=r.application;
+    if(!list || (!list.length && !(a&&((a.principals&&a.principals.length)||(a.linked_companies&&a.linked_companies.length))))) return '';
+    const body = list.length ? list.map(x=>{
+        const n=(x.findings||[]).length; const top=(x.findings||[]).some(f=>f.severity==='high')?'high':n?'medium':'low';
+        return '<div class="subj"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px">'+
+          '<span style="font-weight:700;font-size:14px">'+esc(x.subject)+'</span>'+
+          '<span style="font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1px">'+(x.type==='linked_company'?'LINKED COMPANY':'PRINCIPAL')+'</span>'+
+          (n?sevPill(top):'<span class="sev" style="color:var(--green);border-color:var(--green)">NOTHING FOUND</span>')+'</div>'+
+          (x.summary?'<p style="margin:0 0 6px;font-size:13px;line-height:1.5">'+esc(x.summary)+'</p>':'')+
+          (n?'<ul class="bul">'+x.findings.map(f=>'<li><b style="color:'+(SEV[f.severity]||'var(--amber)')+'">●</b><span>'+link(f.url,f.claim)+(f.url_verified===false?' <span style="color:var(--muted);font-size:11px">(no verified source link)</span>':'')+'</span></li>').join('')+'</ul>':'')+
+        '</div>'; }).join('')
+      : '<p class="summary" style="margin-top:0;color:var(--amber)">Principals or linked companies were provided but no screening results came back. Treat them as unscreened.</p>';
+    const flagged=list.some(x=>(x.findings||[]).length);
+    return '<div style="grid-column:1/-1">'+card('Principal & linked-company screening',flagged?'var(--red)':'var(--green)',list.length+' SCREENED',body)+'</div>';
+  };
+  const confidenceHtml = (r)=>{
+    if(!r.confidence) return '';
+    const d=r.confidence_detail;
+    const head='<span style="color:var(--muted)">CONFIDENCE: <span style="color:var(--ink)">'+esc(String(r.confidence).toUpperCase())+(d&&typeof d.score==='number'?' ('+d.score+'/100)':'')+'</span></span>';
+    if(!(d&&d.reasons&&d.reasons.length)) return '<span style="margin-left:auto">'+head+'</span>';
+    return '<details class="why" style="margin-left:auto;text-align:right"><summary>'+head+'</summary><ul style="text-align:left">'+d.reasons.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></details>';
+  };
+  const boardBlock = (r)=>{
+    const b=r.boardability||{}; if(!b.verdict && !(b.conditions&&b.conditions.length) && !b.routing_note) return '';
+    const col=BOARD[b.verdict]||'var(--muted)';
+    return '<div style="background:var(--panelDeep);border:1px solid '+col+';border-left:4px solid '+col+';border-radius:14px;padding:18px;margin-top:14px">'+
+      '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px">'+
+        '<span style="font-family:var(--mono);font-size:10px;letter-spacing:1.6px;color:var(--muted)">BOARDABILITY PRE-CHECK</span>'+
+        '<span style="font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:1px;color:'+col+';border:1px solid '+col+';border-radius:8px;padding:6px 14px;background:'+col+'14">'+esc(b.verdict||'—')+'</span>'+
+      '</div>'+
+      (b.rationale?'<p style="margin:0 0 12px;font-size:13px;line-height:1.55">'+esc(b.rationale)+'</p>':'')+
+      ((b.conditions&&b.conditions.length)?'<div class="gl" style="color:'+col+'">CONDITIONS</div>'+bullets(b.conditions,col):'')+
+      (b.routing_note?'<div style="margin-top:14px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div class="gl">ROUTING NOTE &rarr; UNDERWRITING</div><button class="tbtn" onclick="window.MI.note()" id="noteBtn">⧉ copy note</button></div>'+
+        '<pre style="margin:0;white-space:pre-wrap;font-family:var(--mono);font-size:12px;line-height:1.5;color:var(--ink);background:var(--canvas);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto">'+esc(b.routing_note)+'</pre></div>':'')+
+    '</div>';
+  };
+
+  function renderReport(){
+    const r = state.report; if(!r){ $('out').innerHTML=''; return; }
+    const rm = RISK[r.payment_risk&&r.payment_risk.classification] || {c:'#8AA0BE',label:'UNCLASSIFIED'};
+    const fit = r.corepay_fit && r.corepay_fit.score;
+    const fitCol = fit>=70?'#22C55E':fit>=40?'#F59E0B':'#F97316';
+    const used = r._meta && r._meta.sources_used;
+    const live = state.source==='live';
+
+    let usedHtml = '';
+    if(used){ usedHtml = '<span style="font-family:var(--mono);font-size:10px;color:var(--muted)">'+['similarweb','builtwith','hunter','site_check','opencorporates','claude'].filter(k=>k in used).map(k=>'<span style="color:'+(used[k]?'#22C55E':'#8AA0BE')+';margin-right:8px">'+(used[k]?'✓':'·')+' '+k.replace('_',' ')+'</span>').join('')+'</span>'; }
+
+    $('out').innerHTML =
+      '<div style="margin-top:22px">'+
+        '<div class="toolbar">'+
+          '<span class="badge" style="color:'+(live?'var(--cyan)':'var(--amber)')+';border:1px solid '+(live?'var(--cyan)':'var(--amber)')+'">'+(live?'LIVE VENDOR DATA':'AI ESTIMATE')+'</span>'+
+          usedHtml+
+          (r._meta&&r._meta.cache==='hit'?'<span class="badge" style="color:var(--muted);border:1px solid var(--lineSoft)">CACHED RESULT</span><button class="tbtn" onclick="window.MI.fresh()">↻ Scan again, skip cache</button>':'')+
+          (state.ctxIgnored?'<span class="badge" style="color:var(--amber);border:1px solid var(--amber)">APPLICATION CONTEXT NOT USED IN ESTIMATE MODE</span>':'')+
+          '<div style="flex:1"></div>'+
+          '<button class="tbtn" onclick="window.MI.pdf()">↧ PDF</button>'+
+          '<button class="tbtn" onclick="window.MI.csv()">↧ CSV</button>'+
+          '<button class="tbtn" onclick="window.MI.json()" id="jsonBtn">⧉ JSON</button>'+
+        '</div>'+
+
+        '<div class="verdict">'+
+          '<div><div style="font-size:22px;font-weight:700">'+esc(r.company&&r.company.name||'')+'</div>'+
+          '<div style="font-family:var(--mono);font-size:12px;color:var(--cyanBright)">'+esc(r.company&&r.company.domain||'—')+'</div></div>'+
+          '<div style="display:flex;gap:26px;align-items:center;flex-wrap:wrap">'+
+            '<div style="text-align:center"><div style="font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:1.5px;margin-bottom:6px">CARD-ACCEPTANCE</div>'+
+            '<span style="font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:1px;color:'+rm.c+';border:1px solid '+rm.c+';border-radius:8px;padding:7px 14px;background:'+rm.c+'14">'+rm.label+'</span></div>'+
+            (typeof fit==='number'?'<div style="min-width:150px"><div style="font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:1.5px;margin-bottom:6px;display:flex;justify-content:space-between"><span>COREPAY FIT</span><span style="color:'+fitCol+'">'+fit+'/100</span></div>'+
+            '<div style="height:8px;background:rgba(255,255,255,.06);border-radius:5px;overflow:hidden"><div style="height:100%;width:'+Math.max(0,Math.min(100,fit))+'%;background:'+fitCol+';border-radius:5px"></div></div>'+
+            '<div style="font-size:11px;color:var(--muted);margin-top:6px">'+esc(r.corepay_fit.verdict||'')+'</div></div>':'')+
+          '</div>'+
+        '</div>'+
+
+        gatesBlock(r)+
+        boardBlock(r)+
+
+        '<div class="grid">'+
+          consistencyCard(r)+
+          siteCard(r)+
+          entityCard(r)+
+          card('Company snapshot','var(--cyan)','',
+            row('industry',r.company&&r.company.industry)+row('hq',r.company&&r.company.hq)+row('founded',r.company&&r.company.founded,1)+row('headcount',r.company&&r.company.employees_estimate,1)+
+            '<p class="summary">'+esc(r.company&&r.company.summary||'')+'</p>')+
+          card('Business model','var(--cyanBright)','',
+            row('type',r.business_model&&r.business_model.type,1)+row('monetization',r.business_model&&r.business_model.monetization)+
+            '<div class="grp"><div class="gl">PRODUCTS</div>'+chips(r.business_model&&r.business_model.products)+'</div>')+
+          card('Website & traffic intel','var(--cyan)',live?'SIMILARWEB':'ESTIMATED',
+            row('traffic',r.web_intel&&r.web_intel.traffic_tier,1)+row('visits/mo',r.web_intel&&r.web_intel.monthly_visits_estimate,1)+
+            '<div class="grp"><div class="gl">TOP GEOGRAPHIES</div>'+chips(r.web_intel&&r.web_intel.top_geographies)+'</div>'+
+            '<div class="grp"><div class="gl">TRAFFIC CHANNELS</div>'+chipsC(r.web_intel&&r.web_intel.primary_channels,'var(--cyanBright)')+'</div>'+
+            '<div class="grp"><div class="gl">TECH SIGNALS'+(live?' · BUILTWITH':'')+'</div>'+chipsC(r.web_intel&&r.web_intel.tech_signals,'var(--muted)')+'</div>'+
+            (r.web_intel&&r.web_intel.notable?'<p class="summary" style="color:var(--muted);font-size:12px">'+esc(r.web_intel.notable)+'</p>':''))+
+          card('Digital footprint','var(--purple)','',
+            '<div class="grp" style="margin-top:0"><div class="gl">SOCIAL</div>'+chipsC(r.digital_presence&&r.digital_presence.social,'var(--purple)')+'</div>'+
+            row('apps',r.digital_presence&&r.digital_presence.app_presence))+
+          card('Domain & infrastructure','var(--cyanBright)',live?'DNS / WHOIS':'',
+            row('domain age',r.infrastructure&&r.infrastructure.domain_age,1)+
+            row('registrar',r.infrastructure&&r.infrastructure.registrar)+
+            row('dns',r.infrastructure&&r.infrastructure.dns_provider)+
+            row('email',r.infrastructure&&r.infrastructure.email_provider)+
+            row('hosting',r.infrastructure&&r.infrastructure.hosting,1)+
+            row('cdn',r.infrastructure&&r.infrastructure.cdn)+
+            row('ssl',r.infrastructure&&r.infrastructure.ssl_issuer)+
+            row('ssl exp',r.infrastructure&&r.infrastructure.ssl_expiry,1)+
+            row('spf',r.infrastructure&&r.infrastructure.spf,1))+
+          '<div style="grid-column:1/-1">'+card('Payment risk assessment',rm.c,rm.label,
+            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">'+
+              '<div>'+row('mcc guess',r.payment_risk&&r.payment_risk.mcc_guess,1)+row('cb risk',r.payment_risk&&r.payment_risk.chargeback_risk)+
+              ((r.payment_risk&&r.payment_risk.mcc_candidates&&r.payment_risk.mcc_candidates.length)?'<div class="grp"><div class="gl">MCC CANDIDATES</div><ul class="bul">'+r.payment_risk.mcc_candidates.map(m=>'<li><b style="color:'+rm.c+'">●</b><span><span style="font-family:var(--mono)">'+esc(m.mcc)+'</span> '+esc(m.description||'')+(m.when?' <span style="color:var(--muted)">('+esc(m.when)+')</span>':'')+'</span></li>').join('')+'</ul></div>':'')+
+              ((r.payment_risk&&r.payment_risk.scheme_registration&&r.payment_risk.scheme_registration.length)?'<div class="grp"><div class="gl">SCHEME REGISTRATION</div>'+bullets(r.payment_risk.scheme_registration.map(x=>x.program+' · MCC '+x.mcc+(x.note?' · '+x.note:'')),rm.c)+'</div>':'')+
+              '<div class="grp"><div class="gl">VERTICAL FLAGS</div>'+chipsC(r.payment_risk&&r.payment_risk.vertical_flags,rm.c)+'</div></div>'+
+              '<div><div class="gl">RATIONALE</div><p style="margin:0;font-size:13px;line-height:1.55">'+esc(r.payment_risk&&r.payment_risk.rationale||'')+'</p></div>'+
+            '</div>')+'</div>'+
+          screeningCard(r)+
+          '<div style="grid-column:1/-1">'+card('Adverse media / compliance scan',(r.adverse_media&&r.adverse_media.flags&&r.adverse_media.flags.length?'var(--red)':'var(--green)'),(r.adverse_media&&r.adverse_media.flags&&r.adverse_media.flags.length?'FLAGS FOUND':'CLEAR'),
+            '<div class="grp" style="margin-top:0"><div class="gl" style="color:var(--amber)">FLAGS</div>'+advFlags(r.adverse_media&&r.adverse_media.flags)+'</div>'+
+            '<p class="summary">'+esc(r.adverse_media&&r.adverse_media.summary||'')+'</p>'+
+            (r.adverse_media&&r.adverse_media.regulatory?'<div class="grp"><div class="gl">REGULATORY</div><p style="margin:0;font-size:13px;line-height:1.55">'+esc(r.adverse_media.regulatory)+'</p></div>':'')+
+            srcList(r.adverse_media&&r.adverse_media.sources)+
+            ((r.adverse_media&&(r.adverse_media.sources_discarded||r.adverse_media.flags_discarded_similar_name))?'<p style="margin:10px 0 0;font-size:12px;color:var(--muted)">Filtered out as unrelated: '+(r.adverse_media.sources_discarded||0)+' search result'+((r.adverse_media.sources_discarded||0)===1?'':'s')+', '+(r.adverse_media.flags_discarded_similar_name||0)+' similar-name flag'+((r.adverse_media.flags_discarded_similar_name||0)===1?'':'s')+'.</p>':''))+'</div>'+
+          card('Corepay / Dispu fit',fitCol,(typeof fit==='number'?fit+'/100':''),
+            '<div class="grp" style="margin-top:0"><div class="gl" style="color:var(--green)">WHY IT FITS</div>'+bullets(r.corepay_fit&&r.corepay_fit.reasons,'var(--green)')+'</div>'+
+            '<div class="grp"><div class="gl" style="color:var(--amber)">WATCHOUTS</div>'+bullets(r.corepay_fit&&r.corepay_fit.watchouts,'var(--amber)')+'</div>')+
+          card('Outreach angle','var(--cyan)',(r.outreach&&r.outreach.suppressed?'PARTNER-REFERRED':''),
+            '<p class="summary" style="margin-top:0">'+esc(r.outreach&&r.outreach.angle||'')+'</p>'+
+            '<div class="grp"><div class="gl">POSSIBLE CONTACTS</div>'+bullets(r.outreach&&r.outreach.possible_contacts,'var(--cyan)')+'</div>')+
+        '</div>'+
+
+        '<div class="sources"><span style="color:var(--muted);letter-spacing:1px">SOURCES:</span>'+
+        (r.sources||[]).map(s=>'<span style="color:var(--cyanBright)">'+esc(s)+'</span>').join(' · ')+
+        confidenceHtml(r)+'</div>'+
+      '</div>';
+
+    buildPrint();
+  }
+
+  function card(title,accent,tag,body){
+    return '<div class="card"><div class="accent" style="background:'+accent+'"></div>'+
+      '<h3>'+esc(title)+(tag?'<span class="tag" style="color:'+accent+'">'+esc(tag)+'</span>':'')+'</h3>'+body+'</div>';
+  }
+
+  function buildPrint(){
+    const r = state.report; if(!r){ $('print').innerHTML=''; return; }
+    const rm = RISK[r.payment_risk&&r.payment_risk.classification]||{c:'#555',label:'UNCLASSIFIED'};
+    const list = a=> (a&&a.length)? a.map(esc).join(' · ') : '—';
+    const fit = r.corepay_fit&&r.corepay_fit.score;
+    $('print').innerHTML =
+      '<div class="ph"><div>'+
+        '<div style="font-family:var(--mono);font-size:12px;letter-spacing:3px;color:#0C1B33;font-weight:700">MERCHANT·INTEL</div>'+
+        '<div style="font-size:22px;font-weight:800;color:#0C1B33;margin-top:2px">'+esc(r.company&&r.company.name||'')+'</div>'+
+        '<div style="font-family:var(--mono);font-size:12px;color:#009ADE">'+esc(r.company&&r.company.domain||'')+'</div></div>'+
+        '<div style="text-align:right;font-family:var(--mono);font-size:10px;color:#566">COREPAY / DISPU DEAL DESK<br>'+(state.source==='live'?'LIVE VENDOR DATA':'AI ESTIMATE')+'<br>'+new Date().toISOString().slice(0,10)+'</div></div>'+
+      '<div style="display:flex;gap:14px;margin-top:12px">'+
+        '<span class="pill" style="color:'+rm.c+';border:1.5px solid '+rm.c+'">'+rm.label+'</span>'+
+        (typeof fit==='number'?'<span class="pill" style="color:#0C1B33;border:1.5px solid #0C1B33">COREPAY FIT '+fit+'/100 — '+esc(r.corepay_fit.verdict||'')+'</span>':'')+'</div>'+
+      ((r.boardability&&r.boardability.verdict)?'<div class="sec">Boardability pre-check</div>'+
+        '<div style="font-size:13px;font-weight:700">'+esc(r.boardability.verdict)+'</div>'+
+        '<div style="font-size:13px;margin-top:4px;line-height:1.55">'+esc(r.boardability.rationale||'')+'</div>'+
+        ((r.boardability.conditions&&r.boardability.conditions.length)?'<div style="font-size:13px;margin-top:4px"><b>Conditions:</b> '+list(r.boardability.conditions)+'</div>':'')+
+        (r.boardability.routing_note?'<div style="margin-top:6px;font-family:var(--mono);font-size:11px;white-space:pre-wrap;background:#f4f6fa;border:1px solid #ccd;border-radius:6px;padding:8px">'+esc(r.boardability.routing_note)+'</div>':''):'')+
+      ((r.gates&&r.gates.length)?'<div class="sec">Deal Desk gates</div>'+r.gates.map(function(g){return '<div style="font-size:13px;line-height:1.5"><b>'+(g.level==='blocking'?'BLOCKING':'REQUIRED')+':</b> '+esc(g.message)+'</div>';}).join(''):'')+
+      (r.application?'<div class="sec">Declared vs observed</div>'+
+        '<div class="meta">Declared: '+esc([r.application.declared_vertical, r.application.monthly_volume!=null&&money(r.application.monthly_volume)+'/mo', r.application.monthly_txn_count!=null&&r.application.monthly_txn_count+' txns', r.application.avg_ticket!=null&&money(r.application.avg_ticket)+' AOV', (r.application.principals||[]).length&&'Principals: '+r.application.principals.join(', '), r.application.referral_partner&&'Referred by '+r.application.referral_partner].filter(Boolean).join(' · '))+'</div>'+
+        (((r.consistency&&r.consistency.mismatches)||[]).length? r.consistency.mismatches.map(function(x){return '<div style="font-size:12.5px;margin-top:4px;line-height:1.45"><b>'+esc(String(x.field).replace(/_/g,' '))+' ('+esc(x.severity)+'):</b> declared '+esc(x.declared)+' — observed '+esc(x.observed)+'</div>';}).join('') : '<div style="font-size:13px">No inconsistencies found.</div>'):'')+
+      (r.site_check?'<div class="sec">Website check</div><div class="meta">Status: '+esc(r.site_check.status)+(r.site_check.http_status!=null?' · HTTP '+esc(r.site_check.http_status):'')+(r.site_check.platform?' · '+esc(r.site_check.platform):'')+(r.site_check.evidence?' · “'+esc(r.site_check.evidence)+'”':'')+'</div>':'')+
+      (r.entity_verification?'<div class="sec">Legal entity</div><div class="meta">'+(r.entity_verification.verified?'Verified':'Not verified')+(r.entity_verification.legal_name?' · '+esc(r.entity_verification.legal_name):'')+(r.entity_verification.registry_id?' · '+esc(r.entity_verification.registry_id):'')+(r.entity_verification.formation_date?' · formed '+esc(r.entity_verification.formation_date):'')+(r.entity_verification.status?' · '+esc(r.entity_verification.status):'')+'</div>'+
+        ((r.entity_verification.officers||[]).length?'<div style="font-size:13px;margin-top:4px">Officers: '+list(r.entity_verification.officers.map(function(o){return typeof o==='string'?o:o.name;}))+'</div>':''):'')+
+      ((r.principal_screening&&r.principal_screening.length)?'<div class="sec">Principal &amp; linked-company screening</div>'+r.principal_screening.map(function(x){return '<div style="font-size:13px;margin-top:4px;line-height:1.5"><b>'+esc(x.subject)+'</b> ('+(x.type==='linked_company'?'linked company':'principal')+'): '+((x.findings||[]).length? x.findings.map(function(f){return esc(f.claim)+' ['+esc(f.severity)+']';}).join('; ') : 'nothing found')+'</div>';}).join(''):'')+
+      '<div class="sec">Company</div><div style="font-size:13px;line-height:1.55">'+esc(r.company&&r.company.summary||'')+'</div>'+
+      '<div class="meta" style="margin-top:6px">Industry: '+esc(r.company&&r.company.industry||'—')+' · HQ: '+esc(r.company&&r.company.hq||'—')+' · Founded: '+esc(r.company&&r.company.founded||'—')+' · Headcount: '+esc(r.company&&r.company.employees_estimate||'—')+'</div>'+
+      '<div class="sec">Business model</div><div class="meta">Type: '+esc(r.business_model&&r.business_model.type||'—')+' · Monetization: '+esc(r.business_model&&r.business_model.monetization||'—')+'</div>'+
+      '<div style="font-size:13px;margin-top:4px">Products: '+list(r.business_model&&r.business_model.products)+'</div>'+
+      '<div class="sec">Website &amp; traffic intel'+(state.source==='live'?' (SimilarWeb / BuiltWith)':' (estimated)')+'</div>'+
+      '<div class="meta">Traffic: '+esc(r.web_intel&&r.web_intel.traffic_tier||'—')+' · Visits/mo: '+esc(r.web_intel&&r.web_intel.monthly_visits_estimate||'—')+'</div>'+
+      '<div style="font-size:13px;margin-top:4px">Geographies: '+list(r.web_intel&&r.web_intel.top_geographies)+'</div>'+
+      '<div style="font-size:13px">Channels: '+list(r.web_intel&&r.web_intel.primary_channels)+'</div>'+
+      '<div style="font-size:13px">Tech: '+list(r.web_intel&&r.web_intel.tech_signals)+'</div>'+
+      '<div class="sec">Domain &amp; infrastructure</div>'+
+      '<div class="meta">Age: '+esc((r.infrastructure&&r.infrastructure.domain_age)||'—')+' · Registrar: '+esc((r.infrastructure&&r.infrastructure.registrar)||'—')+' · DNS: '+esc((r.infrastructure&&r.infrastructure.dns_provider)||'—')+' · Email: '+esc((r.infrastructure&&r.infrastructure.email_provider)||'—')+'</div>'+
+      '<div class="meta">Hosting: '+esc((r.infrastructure&&r.infrastructure.hosting)||'—')+' · CDN: '+esc((r.infrastructure&&r.infrastructure.cdn)||'—')+' · SSL: '+esc((r.infrastructure&&r.infrastructure.ssl_issuer)||'—')+' · SPF: '+esc((r.infrastructure&&r.infrastructure.spf)||'—')+'</div>'+
+      '<div class="sec">Payment risk</div><div class="meta">MCC guess: '+esc(r.payment_risk&&r.payment_risk.mcc_guess||'—')+' · CB risk: '+esc(r.payment_risk&&r.payment_risk.chargeback_risk||'—')+'</div>'+
+      '<div style="font-size:13px;margin-top:4px">Flags: '+list(r.payment_risk&&r.payment_risk.vertical_flags)+'</div>'+
+      '<div style="font-size:13px;margin-top:4px;line-height:1.55">'+esc(r.payment_risk&&r.payment_risk.rationale||'')+'</div>'+
+      '<div class="sec">Adverse media / compliance</div>'+
+      '<div style="font-size:13px">Flags: '+list((r.adverse_media&&r.adverse_media.flags||[]).map(function(f){return (f&&f.claim)||f;}))+'</div>'+
+      '<div style="font-size:13px;margin-top:4px;line-height:1.55">'+esc((r.adverse_media&&r.adverse_media.summary)||'')+'</div>'+
+      ((r.adverse_media&&r.adverse_media.regulatory)?'<div style="font-size:13px;margin-top:4px;line-height:1.55"><b>Regulatory:</b> '+esc(r.adverse_media.regulatory)+'</div>':'')+
+      '<div class="sec">Corepay / Dispu fit</div>'+
+      '<div style="font-size:13px"><b>Why it fits:</b> '+list(r.corepay_fit&&r.corepay_fit.reasons)+'</div>'+
+      '<div style="font-size:13px;margin-top:4px"><b>Watchouts:</b> '+list(r.corepay_fit&&r.corepay_fit.watchouts)+'</div>'+
+      '<div class="sec">Outreach</div><div style="font-size:13px;line-height:1.55">'+esc(r.outreach&&r.outreach.angle||'')+'</div>'+
+      '<div style="font-size:13px;margin-top:4px">Contacts: '+list(r.outreach&&r.outreach.possible_contacts)+'</div>'+
+      '<div style="font-size:13px;margin-top:4px">Social: '+list(r.digital_presence&&r.digital_presence.social)+'</div>'+
+      '<div style="margin-top:16px;padding-top:8px;border-top:1px solid #ccd;font-family:var(--mono);font-size:10px;color:#778">Sources: '+list(r.sources)+' · Confidence: '+esc(String(r.confidence||'').toUpperCase())+(r.confidence_detail&&typeof r.confidence_detail.score==='number'?' ('+r.confidence_detail.score+'/100)':'')+'</div>'+
+      ((r.confidence_detail&&r.confidence_detail.reasons&&r.confidence_detail.reasons.length)?'<div style="font-family:var(--mono);font-size:10px;color:#778;margin-top:4px">Confidence reduced by: '+list(r.confidence_detail.reasons)+'</div>':'');
+  }
+
+  // ---- exports ----
+  function reportToCSV(r){
+    const rows=[['Section','Field','Value']];
+    const push=(s,f,val)=>{ if(val==null||val==='')return; rows.push([s,f,Array.isArray(val)?val.join(' | '):String(val)]); };
+    const c=r.company||{},b=r.business_model||{},w=r.web_intel||{},d=r.digital_presence||{},p=r.payment_risk||{},f=r.corepay_fit||{},o=r.outreach||{};
+    push('Company','Name',c.name);push('Company','Domain',c.domain);push('Company','Industry',c.industry);push('Company','HQ',c.hq);push('Company','Founded',c.founded);push('Company','Headcount',c.employees_estimate);push('Company','Summary',c.summary);
+    push('Business model','Type',b.type);push('Business model','Monetization',b.monetization);push('Business model','Products',b.products);
+    push('Web intel','Traffic tier',w.traffic_tier);push('Web intel','Visits/mo',w.monthly_visits_estimate);push('Web intel','Top geographies',w.top_geographies);push('Web intel','Channels',w.primary_channels);push('Web intel','Tech signals',w.tech_signals);push('Web intel','Notable',w.notable);
+    push('Digital','Social',d.social);push('Digital','Apps',d.app_presence);
+    var inf=r.infrastructure||{};push('Infrastructure','Domain age',inf.domain_age);push('Infrastructure','Registrar',inf.registrar);push('Infrastructure','DNS',inf.dns_provider);push('Infrastructure','Email',inf.email_provider);push('Infrastructure','Hosting',inf.hosting);push('Infrastructure','CDN',inf.cdn);push('Infrastructure','SSL issuer',inf.ssl_issuer);push('Infrastructure','SSL expiry',inf.ssl_expiry);push('Infrastructure','SPF',inf.spf);
+    var am=r.adverse_media||{};push('Adverse media','Flags',(am.flags||[]).map(function(f){return f&&f.claim?(f.claim+(f.url?' ('+f.url+')':'')):f;}));push('Adverse media','Summary',am.summary);push('Adverse media','Regulatory',am.regulatory);push('Adverse media','Sources',(am.sources||[]).map(function(s){return s.url;}));
+    var bd=r.boardability||{};push('Boardability','Verdict',bd.verdict);push('Boardability','Rationale',bd.rationale);push('Boardability','Conditions',bd.conditions);push('Boardability','Routing note',bd.routing_note);
+    push('Payment risk','Classification',p.classification);push('Payment risk','MCC guess',p.mcc_guess);push('Payment risk','Vertical flags',p.vertical_flags);push('Payment risk','Chargeback risk',p.chargeback_risk);push('Payment risk','Rationale',p.rationale);
+    push('Corepay fit','Score',f.score);push('Corepay fit','Verdict',f.verdict);push('Corepay fit','Reasons',f.reasons);push('Corepay fit','Watchouts',f.watchouts);
+    push('Outreach','Angle',o.angle);push('Outreach','Contacts',o.possible_contacts);
+    (r.gates||[]).forEach(function(g){ push('Gates',g.code,(g.level==='blocking'?'BLOCKING: ':'REQUIRED: ')+g.message); });
+    var ap=r.application||null; if(ap){ push('Application','Declared business',ap.declared_vertical);push('Application','Legal entity',ap.legal_name);push('Application','State',ap.entity_state);push('Application','Monthly volume',ap.monthly_volume);push('Application','Monthly transactions',ap.monthly_txn_count);push('Application','Avg ticket',ap.avg_ticket);push('Application','Principals',ap.principals);push('Application','Linked companies',ap.linked_companies);push('Application','Referred by',ap.referral_partner); }
+    ((r.consistency&&r.consistency.mismatches)||[]).forEach(function(x){ push('Declared vs observed',x.field+' ('+x.severity+')','declared: '+x.declared+' | observed: '+x.observed+(x.note?' | '+x.note:'')); });
+    var sc=r.site_check; if(sc){ push('Website check','Status',sc.status);push('Website check','HTTP',sc.http_status);push('Website check','Evidence',sc.evidence);push('Website check','Platform',sc.platform); }
+    var ev=r.entity_verification; if(ev){ push('Legal entity','Verified',ev.verified?'yes':'no');push('Legal entity','Legal name',ev.legal_name);push('Legal entity','Registry ID',ev.registry_id);push('Legal entity','Status',ev.status);push('Legal entity','Formed',ev.formation_date);push('Legal entity','Officers',(ev.officers||[]).map(function(o){return typeof o==='string'?o:o.name;}));push('Legal entity','Source',ev.source_url||ev.source); }
+    (r.principal_screening||[]).forEach(function(x){ push('Screening',x.subject,((x.findings||[]).map(function(f){return f.claim+' ['+f.severity+']'+(f.url?' ('+f.url+')':'');}).join(' | '))||'nothing found'); });
+    push('Payment risk','MCC candidates',((p.mcc_candidates)||[]).map(function(m){return m.mcc+' '+(m.description||'')+(m.when?' ('+m.when+')':'');}));
+    push('Meta','Sources',r.sources);push('Meta','Confidence',r.confidence);
+    if(r.confidence_detail){ push('Meta','Confidence score',r.confidence_detail.score);push('Meta','Confidence reasons',r.confidence_detail.reasons); }
+    return rows.map(row=>row.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  }
+  function download(name,text,mime){
+    const blob=new Blob([text],{type:mime}),url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download=name;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+  }
+
+  // ---- history ----
+  function renderHist(){
+    const h=$('hist'); if(!state.history.length){h.style.display='none';return;}
+    h.style.display='flex';
+    h.innerHTML='<span class="t">RECENT:</span>'+state.history.map((x,i)=>'<button class="chip-btn" onclick="window.MI.view('+i+')">'+esc(x.q)+'</button>').join('');
+  }
+
+  // ---- scan ----
+  let timer=null, wakeTimer=null;
+  function readContext(){
+    const out={}; let n=0;
+    Object.keys(CTX_FIELDS).forEach(id=>{ const val=$(id).value.trim(); if(val){ out[CTX_FIELDS[id]]=val; n++; } });
+    return n?out:null;
+  }
+  function ctxCount(){ return Object.keys(CTX_FIELDS).filter(id=>$(id).value.trim()).length; }
+  function updateCtx(){
+    const n=ctxCount();
+    $('ctxBtn').classList.toggle('on',n>0);
+    $('ctxBtn').textContent = n? 'APPLICATION ('+n+')' : 'APPLICATION';
+    $('ctxState').textContent = n ? (n+' field'+(n>1?'s':'')+' will be sent with the next scan'+(state.ctxDomain?' · last used for '+state.ctxDomain:'')) : 'Empty. The next scan will be domain-only.';
+  }
+  const domOf = (t)=> String(t||'').split('|')[0].trim().toLowerCase().replace(/^[a-z]+:\/\//,'').replace(/^www\./,'').replace(/[\/?#].*$/,'');
+  async function run(q, opts){
+    opts=opts||{};
+    const target=(q!=null?q:$('q').value).trim(); if(!target)return;
+    $('q').value=target;
+    updateMode();
+    const base=$('apiBase').value.trim(), key=$('anthKey').value.trim();
+    let application = readContext();
+    const dom = domOf(target);
+    if(application && base && state.ctxDomain && dom && state.ctxDomain!==dom && !opts.refresh){
+      if(!window.confirm('The application context was last used for '+state.ctxDomain+'.\n\nOK = use the same context for '+dom+'\nCancel = clear it and scan '+dom+' domain-only')){
+        Object.keys(CTX_FIELDS).forEach(id=>{ $(id).value=''; }); application=null; state.ctxDomain=''; updateCtx();
+      }
+    }
+    state.ctxIgnored = !!(application && !base);
+    if(!base && !key){ $('out').innerHTML='<div class="err"><strong style="color:var(--red)">No data source.</strong> Open ⚙ and add a backend URL (live data) or an Anthropic API key (estimate mode).</div>'; return; }
+    state.scanning=true; $('run').disabled=true; $('run').textContent='SCANNING…';
+    let step=0;
+    $('out').innerHTML='<div class="scan"><div class="sweep"></div><div id="scanLine" style="font-family:var(--mono);font-size:13px"><span style="color:var(--cyan)">▸</span> '+SCAN_STEPS[0]+'<span style="animation:pulse 1s infinite">_</span></div><div id="scanDone" style="margin-top:14px;display:flex;flex-direction:column;gap:4px"></div></div>';
+    clearTimeout(wakeTimer);
+    wakeTimer=setTimeout(()=>{ const d=$('scanDone'); if(d&&state.scanning) d.insertAdjacentHTML('beforebegin','<div style="font-size:12px;color:var(--muted);margin-top:10px">Still working. A free-tier backend can take up to a minute to wake up, and screening principals adds more searches.</div>'); },20000);
+    timer=setInterval(()=>{ step=(step+1)%SCAN_STEPS.length; const l=$('scanLine'); if(l)l.innerHTML='<span style="color:var(--cyan)">▸</span> '+SCAN_STEPS[step]+'<span style="animation:pulse 1s infinite">_</span>'; const d=$('scanDone'); if(d)d.innerHTML=SCAN_STEPS.slice(0,step).map(s=>'<div style="font-family:var(--mono);font-size:11px;color:var(--muted)"><span style="color:var(--green)">✓</span> '+s+'</div>').join(''); },850);
+    try{
+      let r,src;
+      if(base){ r=await enrichBackend(base,target,$('region').value,application,opts.refresh); src='live'; if(application){ state.ctxDomain=(r.company&&r.company.domain)||dom; updateCtx(); } }
+      else { r=await enrichAI(key,target,$('region').value); src='estimate'; }
+      state.report=r; state.source=src;
+      state.history=[{q:target,r,src}].concat(state.history.filter(x=>x.q!==target)).slice(0,8);
+      clearInterval(timer); renderReport(); renderHist();
+    }catch(e){
+      clearInterval(timer);
+      $('out').innerHTML='<div class="err"><strong style="color:var(--red)">Scan failed.</strong> '+esc(e.message||'error')+'<div style="margin-top:6px;color:var(--muted);font-size:12px">'+(base?'Check the backend URL is reachable and /api/health responds.':'Check your Anthropic key, or add a backend URL for live data.')+'</div></div>';
+    }finally{
+      clearTimeout(wakeTimer);
+      state.scanning=false; $('run').disabled=false; $('run').textContent='RUN SCAN';
+    }
+  }
+
+  function updateMode(){
+    const base=$('apiBase').value.trim(), key=$('anthKey').value.trim();
+    const mode = base?'LIVE VENDOR DATA': key?'AI ESTIMATE (your key)':'NO SOURCE — add backend or key';
+    $('modeTxt').textContent=mode; $('modeTxt').style.color = base?'var(--cyan)':key?'var(--amber)':'var(--red)';
+    $('gear').classList.toggle('on', !!base);
+    store.set('mi.apiBase',base); store.set('mi.ddToken',$('ddToken').value.trim());
+    $('disc').textContent = base
+      ? 'Live mode: the website is checked directly; traffic & tech from SimilarWeb / BuiltWith; contacts from Hunter; entity, screening, risk & fit from Claude with Deal Desk rules applied on top.'
+      : 'Estimate mode: traffic / headcount / tech are AI-estimated tiers from public signals — not metered panel data. Add your backend URL via ⚙ for live SimilarWeb / BuiltWith / Hunter data.';
+  }
+
+  // ---- BATCH MODE ----------------------------------------------------------
+  function parseDomains(txt){
+    return (txt||'').split(/[\s,;]+/).map(s=>s.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,'').toLowerCase()).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).slice(0,60);
+  }
+  const RISK_ORDER={Prohibited:4,High:3,Medium:2,Low:1};
+  function batchSortRows(){
+    const k=state.batchSort, done=state.batch;
+    const val=(row)=>{ const r=row.report; if(!r) return -1;
+      if(k==='fit') return (r.corepay_fit&&typeof r.corepay_fit.score==='number')?r.corepay_fit.score:-1;
+      if(k==='risk') return RISK_ORDER[r.payment_risk&&r.payment_risk.classification]||0;
+      if(k==='board'){ const m={'PRE-CHECK PASS':5,'CONDITIONAL':4,'ESCALATE':3,'HOLD':2,'DECLINE':1}; return m[r.boardability&&r.boardability.verdict]||0; }
+      return 0; };
+    // queued/scanning rows stay in original order at the bottom; done rows sort by key desc
+    return done.map((row,i)=>({row,i})).sort((a,b)=>{
+      const ad=a.row.status==='done',bd=b.row.status==='done';
+      if(ad&&!bd) return -1; if(bd&&!ad) return 1;
+      if(ad&&bd) return val(b.row)-val(a.row);
+      return a.i-b.i;
+    }).map(x=>x.row);
+  }
+  function renderBatch(){
+    const rows=state.batch;
+    if(!rows.length){ $('batchOut').innerHTML=''; return; }
+    const sorted=batchSortRows();
+    const head='<tr>'+
+      '<th onclick="window.MI.bsort(\'_\')">#</th>'+
+      '<th onclick="window.MI.bsort(\'_\')">DOMAIN</th>'+
+      '<th onclick="window.MI.bsort(\'risk\')">RISK</th>'+
+      '<th onclick="window.MI.bsort(\'fit\')">FIT ▾</th>'+
+      '<th onclick="window.MI.bsort(\'board\')">BOARDABILITY</th>'+
+      '<th>FLAGS</th><th>ADVERSE</th><th>STATUS</th></tr>';
+    const body=sorted.map((row,idx)=>{
+      const r=row.report;
+      let risk='—',fit='—',board='—',flags='—',adv='—';
+      if(r){
+        const rm=RISK[r.payment_risk&&r.payment_risk.classification]||{c:'var(--muted)',label:'—'};
+        risk='<span class="bpill" style="color:'+rm.c+';border:1px solid '+rm.c+'">'+esc(rm.label)+'</span>';
+        const f=r.corepay_fit&&r.corepay_fit.score; const fc=f>=70?'var(--green)':f>=40?'var(--amber)':'var(--orange)';
+        fit=typeof f==='number'?'<span style="font-family:var(--mono);font-weight:700;color:'+fc+'">'+f+'</span>':'—';
+        const bv=r.boardability&&r.boardability.verdict; const bm=BOARD;
+        board=bv?'<span class="bpill" style="color:'+(bm[bv]||'var(--muted)')+';border:1px solid '+(bm[bv]||'var(--muted)')+'">'+esc(bv)+'</span>':'—';
+        flags=esc(((r.payment_risk&&r.payment_risk.vertical_flags)||[]).slice(0,3).join(', '))||'—';
+        const ac=(r.adverse_media&&r.adverse_media.flags||[]).length;
+        adv=ac?'<span style="color:var(--red);font-family:var(--mono)">⚑ '+ac+'</span>':'<span style="color:var(--green);font-family:var(--mono)">clear</span>';
+      }
+      const st=row.status==='done'?'<span style="color:var(--green)">✓</span>':row.status==='scanning'?'<span style="color:var(--cyan);animation:pulse 1s infinite">scanning…</span>':row.status==='error'?'<span style="color:var(--red)" title="'+esc(row.error||'')+'">failed</span>':'<span style="color:var(--muted)">queued</span>';
+      const click=r?' onclick="window.MI.bview('+row.id+')"':'';
+      return '<tr class="brow"'+click+'><td style="color:var(--muted);font-family:var(--mono)">'+(idx+1)+'</td><td class="bdom">'+esc(row.domain)+'</td><td>'+risk+'</td><td>'+fit+'</td><td>'+board+'</td><td style="color:var(--muted);max-width:200px">'+flags+'</td><td>'+adv+'</td><td style="font-family:var(--mono);font-size:11px">'+st+'</td></tr>';
+    }).join('');
+    $('batchOut').innerHTML='<div style="overflow-x:auto"><table class="btab"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>'+
+      '<div style="font-size:11px;color:var(--muted);margin-top:8px">Click any completed row to open its full report. Best-fit leads sort to the top.</div>';
+  }
+  async function runBatch(){
+    if(state.batchRunning) return;
+    const base=$('apiBase').value.trim(), key=$('anthKey').value.trim();
+    if(!base && !key){ $('batchOut').innerHTML='<div class="err"><strong style="color:var(--red)">No data source.</strong> Open ⚙ and add a backend URL or Anthropic key first.</div>'; return; }
+    const domains=parseDomains($('batchInput').value);
+    if(!domains.length){ $('batchOut').innerHTML='<div class="err">Paste at least one domain.</div>'; return; }
+    state.batch=domains.map((d,i)=>({id:i,domain:d,status:'queued',report:null,error:''}));
+    state.batchRunning=true; state.batchStop=false;
+    $('runBatch').disabled=true; $('runBatch').textContent='RUNNING…'; $('stopBatch').style.display='';
+    renderBatch();
+    let done=0;
+    for(const row of state.batch){
+      if(state.batchStop) break;
+      row.status='scanning'; renderBatch(); $('batchProg').textContent=(done)+'/'+state.batch.length+' done';
+      try{
+        const region=$('region').value;
+        row.report = base? await enrichBackend(base,row.domain,region,null) : await enrichAI(key,row.domain,region);
+        row.status='done';
+      }catch(e){ row.status='error'; row.error=e.message||'failed'; }
+      done++; $('batchProg').textContent=done+'/'+state.batch.length+' done'; renderBatch();
+    }
+    state.batchRunning=false; $('runBatch').disabled=false; $('runBatch').textContent='RUN BATCH'; $('stopBatch').style.display='none';
+    $('batchProg').textContent=done+'/'+state.batch.length+' done'+(state.batchStop?' (stopped)':' · complete');
+  }
+  function batchToCSV(){
+    const rows=[['Domain','Risk','Fit','Boardability','Gates','Website','Vertical flags','Adverse flags','Status']];
+    batchSortRows().forEach(row=>{ const r=row.report;
+      rows.push([row.domain,
+        r&&r.payment_risk&&r.payment_risk.classification||'',
+        r&&r.corepay_fit&&typeof r.corepay_fit.score==='number'?r.corepay_fit.score:'',
+        r&&r.boardability&&r.boardability.verdict||'',
+        r&&(r.gates||[]).map(g=>g.code).join(' | ')||'',
+        r&&r.site_check&&r.site_check.status||'',
+        r&&r.payment_risk&&(r.payment_risk.vertical_flags||[]).join(' | ')||'',
+        r&&r.adverse_media&&(r.adverse_media.flags||[]).length||0,
+        row.status]);
+    });
+    return rows.map(r=>r.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  }
+
+  // ---- expose + wire ----
+  window.MI = {
+    pdf:()=>window.print(),
+    csv:()=>{ if(state.report) download((state.report.company&&state.report.company.domain||'merchant')+'-intel.csv', reportToCSV(state.report),'text/csv'); },
+    json:()=>{ if(state.report){ navigator.clipboard&&navigator.clipboard.writeText(JSON.stringify(state.report,null,2)); const b=$('jsonBtn'); if(b){b.textContent='✓ copied'; setTimeout(()=>b.textContent='⧉ JSON',1400);} } },
+    note:()=>{ const n=state.report&&state.report.boardability&&state.report.boardability.routing_note; if(n){ navigator.clipboard&&navigator.clipboard.writeText(n); const b=$('noteBtn'); if(b){b.textContent='✓ copied'; setTimeout(()=>b.textContent='⧉ copy note',1400);} } },
+    view:(i)=>{ const x=state.history[i]; if(!x)return; state.report=x.r; state.source=x.src; state.ctxIgnored=false; $('q').value=x.q; renderReport(); },
+    tab:(which)=>{ const b=which==='batch'; $('batchPanel').style.display=b?'':'none'; $('out').style.display=b?'none':''; $('hist').style.display=(b||!state.history.length)?'none':'flex'; $('tabSingle').classList.toggle('on',!b); $('tabBatch').classList.toggle('on',b); },
+    fresh:()=>run(null,{refresh:true}),
+    batch:()=>runBatch(),
+    stop:()=>{ state.batchStop=true; },
+    batchCSV:()=>{ if(state.batch.length) download('batch-leads.csv', batchToCSV(),'text/csv'); },
+    bsort:(k)=>{ if(k==='_')return; state.batchSort=k; renderBatch(); },
+    bview:(id)=>{ const row=state.batch.find(x=>x.id===id); if(!row||!row.report)return; state.report=row.report; state.source=$('apiBase').value.trim()?'live':'estimate'; $('q').value=row.domain; window.MI.tab('single'); renderReport(); window.scrollTo({top:0,behavior:'smooth'}); }
+  };
+  $('run').onclick=()=>run();
+  $('q').addEventListener('keydown',e=>{ if(e.key==='Enter') run(); });
+  $('gear').onclick=()=>$('settings').classList.toggle('open');
+  $('ctxBtn').onclick=()=>{ const open=$('ctx').classList.toggle('open'); $('ctxBtn').setAttribute('aria-expanded',open?'true':'false'); if(open) $('c_legal').focus(); };
+  $('ctxClear').onclick=()=>{ Object.keys(CTX_FIELDS).forEach(id=>{ $(id).value=''; }); state.ctxDomain=''; updateCtx(); };
+  Object.keys(CTX_FIELDS).forEach(id=>{ $(id).addEventListener('input',updateCtx); $(id).addEventListener('change',updateCtx); });
+  $('ctx').addEventListener('keydown',e=>{ if(e.key==='Enter' && e.target.tagName==='INPUT') run(); });
+  $('apiBase').value = store.get('mi.apiBase'); $('ddToken').value = store.get('mi.ddToken');
+  if(!$('apiBase').value) $('settings').classList.add('open');
+  $('ddToken').addEventListener('input',updateMode);
+  $('apiBase').addEventListener('input',updateMode);
+  $('anthKey').addEventListener('input',updateMode);
+
+  // idle state
+  $('out').innerHTML='<div class="idle"><div style="font-family:var(--mono);font-size:13px;letter-spacing:1px">Enter a domain or company to run enrichment.</div><div style="font-size:12px;margin-top:8px">Pulls intel, then scores card-acceptance risk and deal fit.</div></div>';
+  updateMode();
+  updateCtx();
+})();
+</script>
+</body>
+</html>

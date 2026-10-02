@@ -53,3 +53,13 @@ a subfolder, set the service's root directory to `backend` in the dashboard).
 
 Each scan = up to 4 SimilarWeb + 1 BuiltWith + 2 Hunter + 1 Claude call. Before a team leans on it,
 add a 24h per-domain cache in `server.js` (noted in README) so repeat lookups don't re-bill every vendor.
+
+## Updating an existing deploy to v3
+
+1. In the GitHub repo, **Add file → Upload files** and upload `server.js`, `checks.js`,
+   `checks.test.js`, `package.json`, `README.md`, `DEPLOY.md` and `.env.example`. Commit to `main`.
+2. Render auto-deploys from `main`. Open `…/api/health` — it should show `"version":"3.0.0"`.
+3. Optional, in Render → **Environment**: add `OPENCORPORATES_API_TOKEN`. Add
+   `DEAL_DESK_TOKEN` only after the frontend sends the `x-deal-desk-token` header,
+   otherwise every scan returns 401.
+4. Rollback: Render → Deploys → previous deploy → **Rollback**.

@@ -1,12 +1,13 @@
 {
   "name": "merchant-intel-backend",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "description": "Lead enrichment + website intel backend for Corepay/Dispu deal desk. Pulls real data from SimilarWeb, BuiltWith and Hunter; uses Claude only for the risk/fit judgment layer.",
   "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node --test --test-timeout=60000 checks.test.js"
   },
   "engines": {
     "node": ">=18"
