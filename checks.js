@@ -11,7 +11,7 @@
 // Unit tests: checks.test.js  (npm test)
 // =============================================================================
 
-export const VERSION = "3.0.0";
+export const VERSION = "3.1.0";
 
 // ---- generic helpers --------------------------------------------------------
 export const norm = (s) =>
@@ -153,6 +153,24 @@ export function stateToJurisdiction(state) {
   if (/^[a-z]{2}$/i.test(s) && US_STATES[s.toUpperCase()]) return "us_" + s.toLowerCase();
   const hit = Object.entries(US_STATES).find(([, name]) => name === s.toLowerCase());
   return hit ? "us_" + hit[0].toLowerCase() : null;
+}
+
+// ---- WHOIS field parsing ----------------------------------------------------
+// Anchored at line start on purpose: an unanchored /Registrar\s*:/ matches the
+// "Registrar WHOIS Server:" and "Registrar URL:" lines that come first in most
+// records, which is how a registrar came back as "whois.webcentralgroup.com.au".
+const BAD_REGISTRAR = /^(whois|https?:|www\.|-+$|n\/a|not available|redacted)/i;
+export function parseWhoisField(text, labels) {
+  if (!text) return null;
+  for (const l of labels) {
+    const m = String(text).match(new RegExp("^[ \\t]*" + l + "[ \\t]*:[ \\t]*([^\\r\\n]+)", "im"));
+    if (m && m[1].trim()) return m[1].trim();
+  }
+  return null;
+}
+export function parseRegistrar(text) {
+  const v = parseWhoisField(text, ["Registrar", "Sponsoring Registrar", "Registrar Name"]);
+  return v && !BAD_REGISTRAR.test(v) ? v : null;
 }
 
 // ---- HTML helpers -----------------------------------------------------------
@@ -379,30 +397,53 @@ const normUrl = (u) => {
 const ALLOWED_BASIS = new Set(["domain", "legal_name", "dba", "principal", "linked_company", "registry"]);
 const SEVERITIES = new Set(["high", "medium", "low"]);
 
+// Registered agents, filing agents and formation services appear as "officers" on
+// registry records. They are not related parties, so screening them adds a row
+// that says nothing. Exclude them from screening and from officer cross-checks.
+const SERVICE_PROVIDER_RE = /(registered|resident|statutory) agent|\bagent services\b|incorp(orating|oration)? services|corporation service company|\bcsc\b|legalzoom|zenbusiness|harbor compliance|cogency global|ct corporation|national registered agents|united states corporation agents|vcorp|incfile|bizfilings|registered agents inc/i;
+export const isServiceProvider = (name) => SERVICE_PROVIDER_RE.test(String(name || ""));
+
+// A "flag" is only adverse media when it reports something a third party said or
+// did about the merchant. Observations about the merchant's own setup — new
+// entity, missing policies, which gateway it uses — are structural risk, and
+// filing them as adverse media turns a clean record red.
+const STRUCTURAL_RE = /new(ly)? (entity|formed|company|domain|registered)|no (prior |public |verifiable )?(operating|processing|trading) (history|record)|zero processing|fewer than \d+ months|less than \d+ months|no (refund|cancellation|shipping|return)|missing polic|policy suite|no .{0,24}polic(y|ies) (present|detected|found|published)|crypto[- ]?(primary|only|gateway|payment)|no (public |verifiable )?(social|professional) (footprint|presence)|site title|default .{0,20}wordpress|early[- ]stage|minimally developed|age[- ]gate is|click[- ]through|registered agent address|no (verified |physical )?(commercial|physical|business) address|requires (card[- ])?scheme registration|high[- ]brand[- ]risk|single (named )?member|sole[- ]control|no secondary beneficial owner/i;
+
+function classifyFlagKind(f, urlVerified) {
+  const k = String(f.kind || f.type || "").toLowerCase();
+  if (k === "structural_risk" || k === "structural") return "structural";
+  if (k === "third_party_adverse" || k === "adverse") return "adverse";
+  // Backstop: an unsourced claim about the merchant's own setup is structural.
+  if (!urlVerified && STRUCTURAL_RE.test(String(f.claim || ""))) return "structural";
+  return "adverse";
+}
+
 export function filterFlags(flags, citations) {
   const cited = new Set((citations || []).map((c) => normUrl(c.url)).filter(Boolean));
   const kept = [];
+  const structural = [];
   let dropped = 0;
   for (const f of Array.isArray(flags) ? flags : []) {
     if (!f || !f.claim) continue;
     const basis = String(f.match_basis || "").toLowerCase();
     if (!ALLOWED_BASIS.has(basis)) { dropped++; continue; }
     const u = f.url && cited.has(normUrl(f.url)) ? f.url : "";
-    kept.push({
+    const item = {
       claim: f.subject && !String(f.claim).startsWith("[") ? `[${f.subject}] ${f.claim}` : f.claim,
       url: u,
       subject: f.subject || "",
       match_basis: basis,
       severity: SEVERITIES.has(f.severity) ? f.severity : "medium",
       url_verified: !!u,
-    });
+    };
+    (classifyFlagKind(f, !!u) === "structural" ? structural : kept).push(item);
   }
-  return { flags: kept, dropped };
+  return { flags: kept, structural, dropped };
 }
 
 export function cleanScreening(list, citations) {
   const cited = new Set((citations || []).map((c) => normUrl(c.url)).filter(Boolean));
-  return (Array.isArray(list) ? list : []).filter((x) => x && x.subject).map((x) => ({
+  return (Array.isArray(list) ? list : []).filter((x) => x && x.subject && !isServiceProvider(x.subject)).map((x) => ({
     subject: x.subject,
     type: x.type === "linked_company" ? "linked_company" : "principal",
     summary: x.summary || "",
@@ -457,7 +498,7 @@ export function mergeEntity({ registry, claude, citations, application }) {
 export function entityMismatches({ entity, application }) {
   const m = [];
   if (!application || !entity?.verified) return m;
-  const officers = (entity.officers || []).map((o) => (typeof o === "string" ? o : o.name || "")).join(" ");
+  const officers = (entity.officers || []).map((o) => (typeof o === "string" ? o : o.name || "")).filter((n) => !isServiceProvider(n)).join(" ");
   if (officers && application.principals?.length) {
     const on = norm(officers);
     for (const p of application.principals) {
@@ -527,7 +568,12 @@ export function deterministicMismatches({ application, site, signals, trafficVis
 }
 
 const SEV_RANK = { low: 0, medium: 1, high: 2 };
-export function mergeMismatches(det, claude) {
+// With no application there is nothing declared, so a "mismatch" cannot exist.
+// The model sometimes still produces one (declared: "N/A — no application");
+// those are demoted to observations rather than driving gates and conditions.
+export function mergeMismatches(det, claude, opts) {
+  const hasApplication = !opts || opts.hasApplication !== false;
+  const demoted = [];
   const byField = new Map();
   const push = (x, origin) => {
     if (!x || !x.field) return;
@@ -538,12 +584,17 @@ export function mergeMismatches(det, claude) {
     if (!prev || SEV_RANK[sev] > SEV_RANK[prev.severity]) byField.set(field, prev && prev.origin !== origin ? { ...item, origin: "both" } : item);
   };
   (det || []).forEach((x) => push(x, "deterministic"));
-  (Array.isArray(claude) ? claude : []).forEach((x) => push(x, "claude"));
-  return [...byField.values()].sort((a, b) => SEV_RANK[b.severity] - SEV_RANK[a.severity]);
+  (Array.isArray(claude) ? claude : []).forEach((x) => {
+    if (!x || !x.field) return;
+    if (!hasApplication) { if (x.observed) demoted.push(String(x.observed)); return; }
+    push(x, "claude");
+  });
+  const mismatches = [...byField.values()].sort((a, b) => SEV_RANK[b.severity] - SEV_RANK[a.severity]);
+  return { mismatches, demoted };
 }
 
 // ---- gates ------------------------------------------------------------------------
-export function evaluateGates({ application, site, mismatches, entity, synthOk }) {
+export function evaluateGates({ application, site, mismatches, entity, synthOk, prohibited }) {
   const g = [];
   if (site && GATING_STATUSES.has(site.status)) {
     g.push({ code: "SITE_NOT_LIVE", level: "blocking", message: `Website not live (${site.status.replace(/_/g, " ")}) — hold until the processing URL is live with product, pricing, checkout and policies reviewable` });
@@ -559,6 +610,9 @@ export function evaluateGates({ application, site, mismatches, entity, synthOk }
   }
   if (!synthOk) {
     g.push({ code: "NO_JUDGMENT_LAYER", level: "major", message: "Judgment layer failed — risk, fit and adverse media not assessed" });
+  }
+  for (const p of prohibited || []) {
+    g.push({ code: "VERTICAL_PROHIBITED", level: "blocking", message: `${p.label}: ${p.message}${p.matched ? ` (matched on "${p.matched}")` : ""}` });
   }
   return g;
 }
@@ -579,12 +633,24 @@ export const VISA_HBR = {
 const RISK_ORDER = ["Low", "Medium", "High", "Prohibited"];
 const maxRisk = (a, b) => (RISK_ORDER.indexOf(b) > RISK_ORDER.indexOf(a) ? b : a);
 
+const codesIn = (...parts) => uniq((parts.filter(Boolean).join(" ").match(/\b\d{4}\b/g) || []));
+
+// The MCC the file would actually board under drives the scheme floor.
+// mcc_candidates are alternatives the analyst is weighing, not facts about this
+// merchant, so they never raise the risk class or add a registration flag.
+export function primaryMccs(pr, application) {
+  return codesIn(pr?.mcc_guess, application?.current_mcc);
+}
+export function candidateMccs(pr, application) {
+  const primary = new Set(primaryMccs(pr, application));
+  const cands = Array.isArray(pr?.mcc_candidates) ? pr.mcc_candidates.map((c) => c?.mcc) : [];
+  return codesIn(cands.join(" ")).filter((c) => !primary.has(c));
+}
 export function collectMccs(pr, application) {
-  const text = [pr?.mcc_guess, ...(Array.isArray(pr?.mcc_candidates) ? pr.mcc_candidates.map((c) => c?.mcc) : []), application?.current_mcc].join(" ");
-  return uniq(text.match(/\b\d{4}\b/g) || []);
+  return uniq([...primaryMccs(pr, application), ...candidateMccs(pr, application)]);
 }
 
-export function buildRoutingHeader({ gates, mismatches, application, pr }) {
+export function buildRoutingHeader({ gates, mismatches, application, pr, verticals }) {
   const lines = [];
   if (gates.length) lines.push(`DEAL DESK GATES: ${gates.map((g) => `${g.code} (${g.level})`).join("; ")}`);
   if (application) {
@@ -600,12 +666,21 @@ export function buildRoutingHeader({ gates, mismatches, application, pr }) {
   }
   const mm = (mismatches || []).filter((x) => x.severity !== "low");
   if (mm.length) lines.push(`MISMATCHES: ${mm.map((x) => `${x.field} (${x.severity})`).join("; ")}`);
-  const codes = collectMccs(pr, application);
-  lines.push(`RISK: ${pr.classification}${codes.length ? ` · MCC ${codes.join("/")}` : ""}`);
+  const primary = primaryMccs(pr, application);
+  const cands = candidateMccs(pr, application);
+  lines.push(
+    `RISK: ${pr.classification}` +
+      (primary.length ? ` · MCC ${primary.join("/")}` : "") +
+      (cands.length ? ` (candidates: ${cands.join(", ")})` : "")
+  );
+  for (const v of verticals || []) {
+    lines.push(`${v.label.toUpperCase()} REQUIREMENTS (${v.source}): ${v.items.length} items — see report`);
+    if (v.reserve) lines.push(`  RESERVE/TERMS: ${v.reserve}`);
+  }
   return lines.join("\n");
 }
 
-export function applyGuards({ synth, gates, mismatches, signals, application }) {
+export function applyGuards({ synth, gates, mismatches, signals, application, verticals, observations }) {
   const pr = { classification: "Medium", mcc_guess: "", mcc_candidates: [], vertical_flags: [], chargeback_risk: "", rationale: "", ...(synth?.payment_risk || {}) };
   const bd = { verdict: "", rationale: "", conditions: [], routing_note: "", ...(synth?.boardability || {}) };
   const fit = { score: 0, verdict: "Not scored", reasons: [], watchouts: [], ...(synth?.corepay_fit || {}) };
@@ -621,13 +696,23 @@ export function applyGuards({ synth, gates, mismatches, signals, application }) 
   const adjustments = [];
   const addFlag = (s) => pr.vertical_flags.push(s);
 
-  // 1. Scheme registration floors
+  // 1. Scheme registration floors — PRIMARY MCC only. Candidates are alternatives
+  //    under consideration, so they inform but never raise the risk class.
   let floor = "Low";
-  const codes = collectMccs(pr, application);
-  const hbr = codes.filter((c) => VISA_HBR[c]).map((c) => ({ mcc: c, ...VISA_HBR[c] }));
+  const primary = primaryMccs(pr, application);
+  const cands = candidateMccs(pr, application);
+  const hbr = primary.filter((c) => VISA_HBR[c]).map((c) => ({ mcc: c, ...VISA_HBR[c] }));
+  const hbrCands = cands.filter((c) => VISA_HBR[c]);
+  // Drop the model's own wording for the same point; one canonical line each.
+  pr.vertical_flags = pr.vertical_flags.filter(
+    (f) => !(/high[- ]brand[- ]risk|scheme registration|hbr\b/i.test(String(f)) && [...primary, ...cands].some((c) => String(f).includes(c)))
+  );
   for (const h of hbr) {
     floor = maxRisk(floor, h.floor);
-    addFlag(`Visa high-brand-risk MCC ${h.mcc} (${h.label}) — registration required if coded here`);
+    addFlag(`Visa high-brand-risk MCC ${h.mcc} (${h.label}) — scheme registration required before card volume`);
+  }
+  if (!hbr.length && hbrCands.length) {
+    addFlag(`Final MCC not settled: candidate ${hbrCands.join("/")} is Visa high-brand-risk and would require registration`);
   }
   pr.scheme_registration = hbr.map((h) => ({ mcc: h.mcc, program: "Visa High-Brand Risk registration", label: h.label, note: "Confirm Mastercard registration requirements for the final MCC" }));
 
@@ -643,7 +728,17 @@ export function applyGuards({ synth, gates, mismatches, signals, application }) 
     addFlag(`Recurring-billing signals (${signals.recurring_billing.strong.slice(0, 3).join(", ")}) — verify cancellation flow and dispute exposure`);
   }
 
-  // 3. Declared-vs-observed mismatch floor
+  // 3. Vertical floor — the declared business decides the class even when the
+  //    site currently shows something else (a travel membership file does not
+  //    become low risk because the domain still serves a jewelry store).
+  for (const v of verticals || []) {
+    if (v.floor) {
+      floor = maxRisk(floor, v.floor);
+      if (RISK_ORDER.indexOf(v.floor) >= RISK_ORDER.indexOf("High")) addFlag(`${v.label} (${v.matched_on.join("; ")}) — ${v.source}`);
+    }
+  }
+
+  // 3b. Declared-vs-observed mismatch floor
   if ((mismatches || []).some((x) => x.severity === "high" && x.field !== "website_status")) floor = maxRisk(floor, "Medium");
 
   if (pr.classification !== "Prohibited" && RISK_ORDER.indexOf(floor) > RISK_ORDER.indexOf(pr.classification)) {
@@ -663,13 +758,26 @@ export function applyGuards({ synth, gates, mismatches, signals, application }) 
   }
   if (bd.verdict !== original) adjustments.push(`verdict ${original || "none"} → ${bd.verdict}`);
 
-  // 5. Conditions & watchouts led by gates and mismatches
+  // 5. Conditions & watchouts led by gates, mismatches and vertical guidelines
   const gateConds = gates.map((g) => `${g.level === "blocking" ? "BLOCKING" : "REQUIRED"}: ${g.message}`);
   const mmConds = (mismatches || [])
     .filter((x) => x.severity !== "low" && x.field !== "website_status")
     .map((x) => `Explain ${x.field.replace(/_/g, " ")}: declared "${x.declared}" vs observed "${x.observed}"`);
-  bd.conditions = dedupeText([...gateConds, ...mmConds, ...bd.conditions]).slice(0, 12);
-  fit.watchouts = dedupeText([...gates.map((g) => g.message), ...fit.watchouts]).slice(0, 8);
+  const vertConds = [];
+  let packReserve = false;
+  for (const v of verticals || []) {
+    if (v.reserve) { vertConds.push(`REQUIRED (${v.label}, ${v.source}): ${v.reserve}`); packReserve = true; }
+    vertConds.push(`REQUIRED (${v.label}): ${v.items.length} vertical requirements listed in the report must be satisfied before boarding`);
+  }
+  // A guideline reserve outranks a reserve the model invented for this scan,
+  // so drop the model's figure rather than printing two conflicting numbers.
+  if (packReserve) {
+    const before = bd.conditions.length;
+    bd.conditions = bd.conditions.filter((c) => !/\b\d{1,2}\s?%[^.]{0,40}reserve|reserve[^.]{0,40}\b\d{1,2}\s?%/i.test(String(c)));
+    if (bd.conditions.length !== before) adjustments.push("model reserve figure replaced by the vertical guideline");
+  }
+  bd.conditions = dedupeText([...gateConds, ...vertConds, ...mmConds, ...bd.conditions]).slice(0, 14);
+  fit.watchouts = dedupeText([...gates.map((g) => g.message), ...(observations || []), ...fit.watchouts]).slice(0, 8);
 
   // 6. Fit cap
   const cap = blocking.length ? 40 : major.length ? 65 : 100;
@@ -686,7 +794,7 @@ export function applyGuards({ synth, gates, mismatches, signals, application }) 
   }
 
   // 8. Routing note header (deterministic, cannot be softened by the model)
-  bd.routing_note = [buildRoutingHeader({ gates, mismatches, application, pr }), bd.routing_note].filter(Boolean).join("\n");
+  bd.routing_note = [buildRoutingHeader({ gates, mismatches, application, pr, verticals }), bd.routing_note].filter(Boolean).join("\n");
   if (adjustments.length) bd.rationale = `${bd.rationale ? bd.rationale + " " : ""}[Deal Desk guards applied: ${adjustments.join("; ")}]`;
 
   return { payment_risk: pr, boardability: bd, corepay_fit: fit, outreach, adjustments };
@@ -708,5 +816,8 @@ export function computeConfidence({ synthOk, site, trafficVisits, entity, applic
   if ((relevantSources || 0) < 2) dock(10, `Only ${relevantSources || 0} source(s) directly about this merchant`);
   if ((mismatches || []).some((x) => x.severity === "high")) dock(10, "High-severity inconsistencies unresolved");
   score = Math.max(0, score);
-  return { level: score >= 75 ? "high" : score >= 45 ? "medium" : "low", score, reasons };
+  // Without application context the tool never ran its main check, so the report
+  // cannot be "high confidence" however clean the vendor data looks.
+  const ceiling = application ? 100 : 74;
+  return { level: Math.min(score, ceiling) >= 75 ? "high" : score >= 45 ? "medium" : "low", score, reasons };
 }

@@ -36,8 +36,10 @@ import {
   htmlToText, htmlTitle, extractLinks, detectPlatform, policyLinks, pickFollowLinks,
   classifySite, scanSignals, buildNeedles, splitCitations, filterFlags, cleanScreening,
   foldScreeningIntoFlags, mergeEntity, entityMismatches, deterministicMismatches,
-  mergeMismatches, evaluateGates, applyGuards, computeConfidence,
+  mergeMismatches, evaluateGates, applyGuards, computeConfidence, primaryMccs,
+  parseWhoisField, parseRegistrar,
 } from "./checks.js";
+import { PACK_VERSION, detectPacks, isStartupFile, buildVerticalRequirements, checkProhibited } from "./verticals.js";
 
 const {
   ANTHROPIC_API_KEY,
@@ -164,14 +166,7 @@ async function whoisLookup(domain) {
     return await whoisQuery(m[1].trim(), domain);
   } catch { return null; }
 }
-function parseField(text, labels) {
-  if (!text) return null;
-  for (const l of labels) {
-    const m = text.match(new RegExp(l + "\\s*:?\\s*([^\\r\\n]+)", "i"));
-    if (m) return m[1].trim();
-  }
-  return null;
-}
+const parseField = parseWhoisField; // WHOIS field parsing lives in checks.js (tested there)
 async function domainAge(domain) {
   let created = null, registrar = null, changed = null, source = null;
   const rd = await rdap(domain);
@@ -179,7 +174,7 @@ async function domainAge(domain) {
   else {
     const w = await whoisLookup(domain);
     created = parseField(w, ["Creation Date", "Created On", "created", "Registered On", "Registration Date", "Registered"]);
-    registrar = parseField(w, ["Registrar"]);
+    registrar = parseRegistrar(w);
     source = created ? "WHOIS" : null;
   }
   let age = null;
@@ -195,7 +190,7 @@ function nsProvider(ns) {
   if (s.includes("awsdns")) return "AWS Route 53";
   if (s.includes("domaincontrol")) return "GoDaddy";
   if (s.includes("googledomains") || s.includes("google.com")) return "Google";
-  if (s.includes("nsone") || s.includes("ns1.")) return "NS1";
+  if (s.includes("nsone.net")) return "NS1";
   if (s.includes("akam")) return "Akamai";
   if (s.includes("azure-dns")) return "Azure DNS";
   if (s.includes("dnsimple")) return "DNSimple";
@@ -405,7 +400,7 @@ const SCHEMA =
   '"corepay_fit":{"score":number,"verdict":string,"reasons":string[],"watchouts":string[]},' +
   '"boardability":{"verdict":"PRE-CHECK PASS"|"CONDITIONAL"|"DECLINE"|"ESCALATE","rationale":string,"conditions":string[],"routing_note":string},' +
   '"outreach":{"angle":string,"possible_contacts":string[]},' +
-  '"adverse_media":{"flags":[{"subject":string,"match_basis":"domain"|"legal_name"|"dba"|"principal"|"linked_company"|"registry"|"similar_name_only","claim":string,"severity":"high"|"medium"|"low","url":string}],"summary":string,"regulatory":string},' +
+  '"adverse_media":{"flags":[{"subject":string,"match_basis":"domain"|"legal_name"|"dba"|"principal"|"linked_company"|"registry"|"similar_name_only","kind":"third_party_adverse"|"structural_risk","claim":string,"severity":"high"|"medium"|"low","url":string}],"summary":string,"regulatory":string},' +
   '"entity_verification":{"found":boolean,"legal_name":string,"registry_id":string,"jurisdiction":string,"status":string,"formation_date":string,"officers":string[],"registered_address_type":"residential"|"commercial"|"virtual_office"|"registered_agent"|"unknown","source_url":string},' +
   '"principal_screening":[{"subject":string,"type":"principal"|"linked_company","summary":string,"findings":[{"claim":string,"severity":"high"|"medium"|"low","url":string}]}],' +
   '"consistency_check":{"summary":string,"mismatches":[{"field":string,"declared":string,"observed":string,"severity":"high"|"medium"|"low","note":string}]},' +
@@ -417,10 +412,12 @@ const SYSTEM = [
   "1. There are two businesses to consider: the OBSERVED business (domain, the deterministic site_check you are given, your web research) and, when application context is provided, the DECLARED business from the precheck form. When application context exists, classify payment_risk and MCC on the DECLARED business, because that is what will be processed. Never lower risk because the current website looks benign. Record every inconsistency between declared and observed in consistency_check.mismatches (e.g. vertical, volume vs footprint, entity, principals, processing history, website status).",
   "2. site_check was run directly against the website. If its status is not 'live', do not describe the storefront as trading and do not claim it is live.",
   "3. Screening scope: (a) the domain/brand; (b) the legal entity in its state or national business registry - search the official registry or reliable registry mirrors for status, formation date, officers/managers and registered address, and report it in entity_verification with the exact source URL; (c) each named principal by full name plus location; (d) each linked company named in the application or notes (prior employers, affiliated businesses) for regulatory actions, lawsuits, pyramid-scheme or earnings-claim enforcement, card-scheme problems. Put person and linked-company results in principal_screening, and repeat material ones in adverse_media.flags.",
+  "4a. adverse_media.flags carries two different things, and kind separates them. kind 'third_party_adverse' is reserved for something a third party reported or did about this merchant: regulatory action, lawsuit, enforcement, card-scheme listing, sanctions, breach, documented complaint pattern. Everything you observe about the merchant's own setup - new entity, young domain, no processing history, missing policies, which payment gateway it uses, thin site, sole control - is kind 'structural_risk'. Do not report structural observations as adverse media; if no third-party adverse record exists, say so plainly in summary and let the structural items carry kind 'structural_risk'.",
+  "4b. Do not screen registered agents, filing agents or formation services (for example Northwest Registered Agent, CSC, LegalZoom). They appear on registry records but are service providers, not related parties. Note a registered-agent-only address as a structural_risk flag instead.",
   "4. Name collisions: only report a finding when it is tied to the subject by the exact domain, the exact legal or DBA name, a named principal with matching context (location, company), or a named linked company. Unrelated companies with similar names must be excluded; if all you have is a similar name, set match_basis to 'similar_name_only'. Never fabricate. If nothing is found, say so plainly.",
   "5. Every url must be copied exactly from your web_search results. If unsure, use an empty string. Never invent a URL.",
   "6. Affiliate/MLM: if the site, test logins or notes indicate affiliates, a back office, a compensation plan, recruitment or income claims, treat it as a business-opportunity/MLM model (FTC earnings-claims exposure, affiliate-fee chargebacks) and require the comp plan and income disclosure in conditions.",
-  "7. MCC: give mcc_guess and mcc_candidates with when each applies (e.g. 4722 travel agency vs 5962 travel sold via direct marketing or clubs). Visa high-brand-risk MCCs (5122, 5912, 5962, 5966, 5967, 5993, 7273, 7995, and 4816/5816 in certain cases) require scheme registration.",
+  "7. MCC: mcc_guess is the single code this merchant would actually board under, and it alone drives the scheme floor. Put genuine alternatives in mcc_candidates - they are options being weighed, not facts about this merchant, so do not write a scheme-registration flag for a candidate. State each registration point once. Give mcc_guess and mcc_candidates with when each applies (e.g. 4722 travel agency vs 5962 travel sold via direct marketing or clubs). Visa high-brand-risk MCCs (5122, 5912, 5962, 5966, 5967, 5993, 7273, 7995, and 4816/5816 in certain cases) require scheme registration.",
   "8. boardability.verdict is one of 'PRE-CHECK PASS', 'CONDITIONAL', 'DECLINE', 'ESCALATE'. Conditions must be concrete (reserve %, caps, documents, licences such as Seller of Travel, age verification, descriptor). routing_note is factual and structured with no marketing tone: merchant, domain, declared vs observed business, MCC, risk class, top flags with subject, conditions, next step.",
   "9. If referral_partner is provided, outreach.angle must state that communication goes through the partner and possible_contacts must be empty.",
   "10. corepay_fit.score (0-100) reflects fit AND evidence quality; do not exceed 60 when the site is not live or the declared business cannot be observed.",
@@ -517,21 +514,49 @@ app.post("/api/enrich", requireToken, async (req, res) => {
     } catch (e) { console.error("synthesize failed:", e.message); }
     const fill = synth?.company_fill || {};
 
-    // name-collision filter + grounding
-    const needles = buildNeedles({ domain, application });
-    const { relevant, discarded } = splitCitations(citations, needles);
-    const { flags, dropped } = filterFlags(synth?.adverse_media?.flags, citations);
+    // adverse vs structural, screening, entity
+    const { flags, structural, dropped } = filterFlags(synth?.adverse_media?.flags, citations);
     const principal_screening = cleanScreening(synth?.principal_screening, citations);
     const allFlags = foldScreeningIntoFlags(flags, principal_screening);
-
-    // entity + consistency + gates + guards
     const entity = mergeEntity({ registry, claude: synth?.entity_verification, citations, application });
-    const mismatches = mergeMismatches([...detMismatches, ...entityMismatches({ entity, application })], synth?.consistency_check?.mismatches);
-    const gates = evaluateGates({ application, site: sc.site, mismatches, entity, synthOk: !!synth });
-    const guarded = applyGuards({ synth, gates, mismatches, signals: sc.signals, application });
+
+    // Name-collision filter, with one exemption: a citation that evidenced the
+    // registry record or a kept finding is about this merchant by definition,
+    // even when its page title never says the merchant's name.
+    const needles = buildNeedles({ domain, application });
+    const { relevant, discarded } = splitCitations(citations, needles);
+    const evidenceUrls = new Set(
+      [entity?.source_url, ...allFlags.map((f) => f.url), ...principal_screening.flatMap((p) => p.findings.map((f) => f.url))].filter(Boolean)
+    );
+    const relevantUrls = new Set(relevant.map((c) => c.url));
+    const rescued = discarded.filter((c) => evidenceUrls.has(c.url) && !relevantUrls.has(c.url)).map((c) => ({ ...c, matched: "used as evidence" }));
+    const relevantSources = [...relevant, ...rescued];
+    const discardedCount = discarded.length - rescued.length;
+
+    // consistency + vertical packs + gates + guards
+    const { mismatches, demoted } = mergeMismatches(
+      [...detMismatches, ...entityMismatches({ entity, application })],
+      synth?.consistency_check?.mismatches,
+      { hasApplication: !!application }
+    );
+    const packs = detectPacks({
+      signals: sc.signals,
+      primaryMccs: primaryMccs(synth?.payment_risk, application),
+      application,
+      businessModelText: [synth?.business_model?.type, synth?.business_model?.monetization, (synth?.business_model?.products || []).join(" ")].filter(Boolean).join(" "),
+    });
+    const startup = isStartupFile({ application, site: sc.site, entityFormationDate: entity?.formation_date, domainCreated: di?.age?.created });
+    const vertical_requirements = buildVerticalRequirements(packs, { startup });
+    const prohibited = checkProhibited(packs, [sc.excerpt, JSON.stringify(sc.signals || {}), synth?.business_model?.type, (synth?.business_model?.products || []).join(" ")].filter(Boolean).join(" "));
+    const gates = evaluateGates({ application, site: sc.site, mismatches, entity, synthOk: !!synth, prohibited });
+    const guarded = applyGuards({
+      synth, gates, mismatches, signals: sc.signals, application,
+      verticals: vertical_requirements,
+      observations: demoted.map((d) => `Observed (no application to compare against): ${d}`),
+    });
     const confidence = computeConfidence({
       synthOk: !!synth, site: sc.site, trafficVisits: sw?.visits ?? null, entity, application,
-      relevantSources: relevant.length, principalsScreened: principal_screening.some((p) => p.type === "principal"), mismatches,
+      relevantSources: relevantSources.length, principalsScreened: principal_screening.some((p) => p.type === "principal"), mismatches,
     });
 
     const regDate = di?.age?.created ? String(di.age.created).slice(0, 10) : null;
@@ -577,10 +602,13 @@ app.post("/api/enrich", requireToken, async (req, res) => {
         flags: allFlags,
         summary: synth?.adverse_media?.summary || "",
         regulatory: synth?.adverse_media?.regulatory || "",
-        sources: relevant.slice(0, 12),
-        sources_discarded: discarded.length,
+        sources: relevantSources.slice(0, 12),
+        sources_discarded: discardedCount,
         flags_discarded_similar_name: dropped,
       },
+      // Observations about the merchant's own setup. Kept apart from adverse
+      // media so a clean third-party record is not shown as a red flag.
+      risk_observations: structural,
       outreach: {
         ...guarded.outreach,
         possible_contacts: guarded.outreach.suppressed
@@ -596,6 +624,7 @@ app.post("/api/enrich", requireToken, async (req, res) => {
       gates,
       entity_verification: entity,
       principal_screening,
+      vertical_requirements,
       guard_adjustments: guarded.adjustments,
       confidence_detail: confidence,
 
@@ -603,6 +632,7 @@ app.post("/api/enrich", requireToken, async (req, res) => {
       confidence: confidence.level,
       _meta: {
         version: VERSION,
+        packs: PACK_VERSION,
         resolved_domain: domain,
         cache: "miss",
         application_context: !!application,

@@ -8,7 +8,9 @@ import {
   cleanDomain, parseQuery, splitPrincipals, normalizeApplication, classifySite, scanSignals,
   buildNeedles, splitCitations, filterFlags, deterministicMismatches, mergeMismatches,
   evaluateGates, applyGuards, computeConfidence, mergeEntity, entityMismatches, stateToJurisdiction,
+  primaryMccs, candidateMccs, isServiceProvider, cleanScreening, parseWhoisField, parseRegistrar,
 } from "./checks.js";
+import { detectPacks, buildVerticalRequirements, checkProhibited, isStartupFile } from "./verticals.js";
 
 const pad = (s) => s + " " + "Lorem ipsum dolor sit amet consectetur. ".repeat(60);
 
@@ -88,8 +90,8 @@ test("name-collision filter on sources and flags", () => {
 
   const { flags, dropped } = filterFlags([
     { subject: "Inspire Uplift", match_basis: "similar_name_only", claim: "BBB complaints", url: "https://www.bbb.org/us/inspire-uplift", severity: "medium" },
-    { subject: "YTB", match_basis: "linked_company", claim: "CA AG pyramid scheme settlement 2009", url: "https://oag.ca.gov/news/ytb", severity: "high" },
-    { subject: "Vida Divina", match_basis: "linked_company", claim: "FTC notice", url: "https://made-up.example/url", severity: "medium" },
+    { subject: "YTB", match_basis: "linked_company", kind: "third_party_adverse", claim: "CA AG pyramid scheme settlement 2009", url: "https://oag.ca.gov/news/ytb", severity: "high" },
+    { subject: "Vida Divina", match_basis: "linked_company", kind: "third_party_adverse", claim: "FTC notice", url: "https://made-up.example/url", severity: "medium" },
   ], cites);
   assert.equal(dropped, 1);
   assert.equal(flags.length, 2);
@@ -119,21 +121,26 @@ test("guards: replay of the v2 Inspire 2 Shine verdict", () => {
     corepay_fit: { score: 72, verdict: "CONDITIONAL", reasons: [], watchouts: [] },
     outreach: { angle: "Position Corepay as jewelry-friendly PSP", possible_contacts: ["Instagram DM: @inspire2shine.i2s"] },
   };
-  const mismatches = mergeMismatches(deterministicMismatches({ application, site, signals: {} }), [
+  const { mismatches } = mergeMismatches(deterministicMismatches({ application, site, signals: {} }), [
     { field: "vertical", declared: "Travel Membership", observed: "handmade jewelry DTC store", severity: "high", note: "" },
-  ]);
+  ], { hasApplication: true });
   const gates = evaluateGates({ application, site, mismatches, entity: { verified: true }, synthOk: true });
   assert.deepEqual(gates.map((g) => g.code), ["SITE_NOT_LIVE", "DECLARED_VS_OBSERVED"]);
 
-  const g = applyGuards({ synth: v2Synth, gates, mismatches, signals: {}, application });
+  const verticals = buildVerticalRequirements(detectPacks({ signals: {}, primaryMccs: ["5094"], application }));
+  assert.deepEqual(verticals.map((v) => v.id), ["travel"], "declared travel membership selects the travel pack");
+
+  const g = applyGuards({ synth: v2Synth, gates, mismatches, signals: {}, application, verticals });
   assert.equal(g.boardability.verdict, "HOLD");
-  assert.equal(g.payment_risk.classification, "High", "5962 candidate lifts the floor");
+  assert.equal(g.payment_risk.classification, "High", "the declared travel vertical lifts the floor, not the 5962 candidate");
   assert.ok(g.corepay_fit.score <= 40);
   assert.ok(g.boardability.conditions[0].startsWith("BLOCKING"));
   assert.ok(g.boardability.routing_note.startsWith("DEAL DESK GATES: SITE_NOT_LIVE"));
   assert.equal(g.outreach.suppressed, true);
   assert.ok(!JSON.stringify(g.outreach).includes("Instagram"));
-  assert.ok(g.payment_risk.vertical_flags.some((f) => f.includes("5962")));
+  assert.ok(!g.payment_risk.vertical_flags.some((f) => /registration required/i.test(f) && f.includes("5962")), "5962 is only a candidate here, so no registration flag");
+  assert.ok(g.payment_risk.vertical_flags.some((f) => /Travel club/i.test(f)));
+  assert.ok(g.boardability.routing_note.includes("MCC 5094 (candidates: 5962, 4722)"));
 });
 
 test("guards: DECLINE is never softened; major-only gates stop a PASS", () => {
@@ -146,6 +153,170 @@ test("confidence is not HIGH for a domain-only scan of an offline site", () => {
   const c = computeConfidence({ synthOk: true, site: { status: "maintenance" }, trafficVisits: null, entity: { verified: false }, application: null, relevantSources: 2, principalsScreened: false, mismatches: [] });
   assert.notEqual(c.level, "high");
   assert.ok(c.reasons.length >= 3);
+});
+
+
+// ---------------------------------------------------------------------------
+// v3.1 regressions — every one of these was produced by the boppythots scan
+// ---------------------------------------------------------------------------
+test("no application context means no declared-vs-observed mismatch", () => {
+  const claudeMm = [{ field: "payment_capability_vs_current_integration", declared: "N/A — no application", observed: "WooCommerce cart but join-now routes to NOWPayments crypto only", severity: "medium", note: "" }];
+  const { mismatches, demoted } = mergeMismatches([], claudeMm, { hasApplication: false });
+  assert.equal(mismatches.length, 0, "a mismatch cannot exist with nothing declared");
+  assert.equal(demoted.length, 1, "the observation is kept, just not as a mismatch");
+  const withApp = mergeMismatches([], claudeMm, { hasApplication: true });
+  assert.equal(withApp.mismatches.length, 1);
+});
+
+test("MCC candidates never raise the floor or add a registration flag", () => {
+  const pr = { mcc_guess: "5967", mcc_candidates: [{ mcc: "7273" }, { mcc: "5818" }] };
+  assert.deepEqual(primaryMccs(pr, null), ["5967"]);
+  assert.deepEqual(candidateMccs(pr, null), ["7273", "5818"]);
+  const g = applyGuards({
+    synth: { payment_risk: { classification: "High", ...pr, vertical_flags: ["Visa high-brand-risk MCC (5967) requires card-scheme registration before boarding"] }, boardability: { verdict: "CONDITIONAL" } },
+    gates: [], mismatches: [], signals: {},
+  });
+  const regFlags = g.payment_risk.vertical_flags.filter((f) => /registration/i.test(f));
+  assert.equal(regFlags.length, 1, "one registration line, not three: " + JSON.stringify(regFlags));
+  assert.ok(regFlags[0].includes("5967"));
+  assert.ok(!JSON.stringify(g.payment_risk.vertical_flags).includes("7273"), "dating MCC candidate must not appear as a scheme flag");
+  assert.deepEqual(g.payment_risk.scheme_registration.map((x) => x.mcc), ["5967"]);
+  assert.ok(g.boardability.routing_note.includes("MCC 5967 (candidates: 7273, 5818)"));
+});
+
+test("a non-high-brand-risk primary with an HBR candidate gets one soft note", () => {
+  const g = applyGuards({
+    synth: { payment_risk: { classification: "Medium", mcc_guess: "5399", mcc_candidates: [{ mcc: "5962" }], vertical_flags: [] } },
+    gates: [], mismatches: [], signals: {},
+  });
+  assert.equal(g.payment_risk.classification, "Medium", "a candidate alone must not raise the class");
+  assert.ok(g.payment_risk.vertical_flags.some((f) => /Final MCC not settled/.test(f)));
+});
+
+test("structural risk is separated from third-party adverse media", () => {
+  const cites = [{ url: "https://oag.ca.gov/x", title: "AG action" }];
+  const { flags, structural } = filterFlags([
+    { subject: "boppythots.com", match_basis: "domain", claim: "Site integrates NOWPayments crypto gateway on the join-now page", severity: "medium" },
+    { subject: "boppythots.com", match_basis: "domain", claim: "No refund or cancellation policy present on a subscription-billing site", severity: "medium" },
+    { subject: "Boppythots LLC", match_basis: "legal_name", claim: "Entity and domain are both fewer than 6 months old; no operating history", severity: "medium" },
+    { subject: "Acme", match_basis: "legal_name", kind: "third_party_adverse", claim: "State AG enforcement action", url: "https://oag.ca.gov/x", severity: "high" },
+  ], cites);
+  assert.equal(structural.length, 3, "setup observations are structural: " + JSON.stringify(structural.map((f) => f.claim)));
+  assert.equal(flags.length, 1);
+  assert.ok(flags[0].claim.includes("enforcement"));
+  assert.equal(flags[0].url_verified, true);
+});
+
+test("an explicit kind from the model wins over the keyword backstop", () => {
+  const { flags, structural } = filterFlags([
+    { subject: "x.com", match_basis: "domain", kind: "structural_risk", claim: "Something with no keywords at all", severity: "low" },
+    { subject: "x.com", match_basis: "domain", kind: "third_party_adverse", claim: "New entity named in an FTC complaint", severity: "high" },
+  ], []);
+  assert.equal(structural.length, 1);
+  assert.equal(flags.length, 1);
+  assert.ok(flags[0].claim.includes("FTC"));
+});
+
+test("registered agents are not screened and not cross-checked as officers", () => {
+  assert.ok(isServiceProvider("Northwest Registered Agent LLC"));
+  assert.ok(isServiceProvider("CT Corporation System"));
+  assert.ok(!isServiceProvider("Corinthian Collier"));
+  const cleaned = cleanScreening([
+    { subject: "Corinthian Collier", type: "principal", summary: "No adverse findings", findings: [] },
+    { subject: "Northwest Registered Agent LLC", type: "linked_company", summary: "Registered agent address only", findings: [{ claim: "agent address", severity: "low" }] },
+  ], []);
+  assert.deepEqual(cleaned.map((x) => x.subject), ["Corinthian Collier"]);
+  const application = normalizeApplication({ legal_name: "Boppythots LLC", principals: "Corinthian Collier" });
+  const entity = { verified: true, officers: ["Corinthian Collier", "Northwest Registered Agent LLC"] };
+  assert.deepEqual(entityMismatches({ entity, application }), []);
+});
+
+test("vertical packs carry Corepay's own adult terms, not invented numbers", () => {
+  const signals = scanSignals(["Explicit adult content. You must be 18+ to enter. Membership join now. 2257 compliance."]);
+  const packs = detectPacks({ signals, primaryMccs: ["5967"], application: null, businessModelText: "Adult content subscription site" });
+  assert.ok(packs.some((p) => p.id === "adult"));
+  const reqs = buildVerticalRequirements(packs, { startup: true });
+  const adult = reqs.find((r) => r.id === "adult");
+  assert.match(adult.reserve, /20% rolling reserve for 180 days/);
+  assert.match(adult.reserve, /EUR 50,000/);
+  assert.equal(adult.source, "Corepay guideline");
+  const joined = adult.items.join(" | ");
+  assert.match(joined, /2257/);
+  assert.match(joined, /anti-human-trafficking/i);
+  assert.match(joined, /age and ID verification at sign-up/i);
+  assert.match(joined, /Aether Labs/, "startup extras fold in when there is no processing history");
+
+  const g = applyGuards({ synth: { boardability: { verdict: "CONDITIONAL" }, payment_risk: { classification: "High", mcc_guess: "5967" } }, gates: [], mismatches: [], signals, verticals: reqs });
+  assert.ok(g.boardability.conditions.some((c) => /20% rolling reserve/.test(c)), JSON.stringify(g.boardability.conditions));
+  assert.ok(g.boardability.routing_note.includes("ADULT CONTENT REQUIREMENTS"));
+});
+
+test("the AI overlay only applies on top of an adult file, and flags prohibited likeness editing", () => {
+  const aiOnly = detectPacks({ signals: scanSignals(["AI image generator for marketing teams"]), primaryMccs: ["5818"], application: null });
+  assert.ok(!aiOnly.some((p) => p.id === "adult_ai"), "no adult base pack, so no adult-AI overlay");
+
+  const both = detectPacks({ signals: scanSignals(["Explicit adult content, 18+. AI girlfriend companion with face swap uploads."]), primaryMccs: ["5967"], application: null });
+  assert.ok(both.some((p) => p.id === "adult") && both.some((p) => p.id === "adult_ai"));
+  const prohibited = checkProhibited(both, "upload a photo and face swap it onto the model");
+  assert.equal(prohibited.length, 1);
+  assert.match(prohibited[0].message, /no-go/);
+  const gates = evaluateGates({ application: null, site: { status: "live" }, mismatches: [], entity: {}, synthOk: true, prohibited });
+  assert.ok(gates.some((g) => g.code === "VERTICAL_PROHIBITED" && g.level === "blocking"));
+});
+
+test("peptide and travel packs match their own verticals", () => {
+  const pep = detectPacks({ signals: scanSignals(["Research use only peptides. BPC-157. Certificate of analysis."]), primaryMccs: [], application: null });
+  const p = buildVerticalRequirements(pep).find((x) => x.id === "peptides");
+  assert.match(p.reserve, /Visa only/);
+  assert.match(p.items.join(" "), /SSB bank account/);
+
+  const trav = detectPacks({ signals: {}, primaryMccs: ["5962"], application: normalizeApplication({ declared_vertical: "Travel membership" }) });
+  const t = buildVerticalRequirements(trav).find((x) => x.id === "travel");
+  assert.match(t.items.join(" "), /Seller of Travel/);
+  assert.match(t.source, /^Drafted/, "travel pack is not from a ratified Corepay doc and says so");
+});
+
+test("isStartupFile keys off processing history, not just age", () => {
+  assert.equal(isStartupFile({ application: normalizeApplication({ previously_accepted_cards: "yes" }), site: { status: "live" } }), false);
+  assert.equal(isStartupFile({ application: null, site: { status: "live" }, domainCreated: "2026-05-29" }), true);
+});
+
+
+test("a guideline reserve replaces a reserve figure the model invented", () => {
+  const verticals = buildVerticalRequirements(detectPacks({ signals: scanSignals(["explicit adult content 18+ membership"]), primaryMccs: ["5967"], application: null }), { startup: true });
+  const g = applyGuards({
+    synth: { boardability: { verdict: "CONDITIONAL", conditions: ["Rolling reserve: minimum 10% for 180 days", "Monthly volume cap of $15,000 for first 90 days"] }, payment_risk: { classification: "High", mcc_guess: "5967" } },
+    gates: [], mismatches: [], signals: {}, verticals,
+  });
+  assert.ok(!g.boardability.conditions.some((c) => /10%/.test(c)), "the 10% figure must not sit under a 20% guideline");
+  assert.ok(g.boardability.conditions.some((c) => /\$15,000/.test(c)), "a volume cap is not a reserve and stays");
+  assert.ok(g.boardability.conditions.some((c) => /20% rolling reserve/.test(c)));
+});
+
+test("a domain-only scan never reports high confidence", () => {
+  const c = computeConfidence({ synthOk: true, site: { status: "live" }, trafficVisits: 50000, entity: { verified: true }, application: null, relevantSources: 5, principalsScreened: true, mismatches: [] });
+  assert.equal(c.level, "medium", "the declared-vs-observed check never ran, so the report is not high confidence");
+  const withApp = computeConfidence({ synthOk: true, site: { status: "live" }, trafficVisits: 50000, entity: { verified: true }, application: { legal_name: "X" }, relevantSources: 5, principalsScreened: true, mismatches: [] });
+  assert.equal(withApp.level, "high");
+});
+
+
+test("registrar is read from the Registrar line, not Registrar WHOIS Server", () => {
+  // Shape of a real .com record: the decoy lines come first.
+  const whois = [
+    "   Domain Name: BOPPYTHOTS.COM",
+    "   Registry Domain ID: 1234_DOMAIN_COM-VRSN",
+    "   Registrar WHOIS Server: whois.webcentralgroup.com.au",
+    "   Registrar URL: http://www.webcentralgroup.com.au",
+    "   Creation Date: 2026-05-29T04:12:00Z",
+    "   Registrar: Web Central Group Pty Ltd",
+    "   Registrar IANA ID: 1234",
+  ].join("\r\n");
+  assert.equal(parseRegistrar(whois), "Web Central Group Pty Ltd");
+  assert.equal(parseWhoisField(whois, ["Creation Date"]), "2026-05-29T04:12:00Z");
+  // A record with only the decoy lines yields nothing rather than a hostname.
+  assert.equal(parseRegistrar("Registrar WHOIS Server: whois.example.com\nRegistrar URL: https://example.com"), null);
+  assert.equal(parseRegistrar("Registrar: REDACTED FOR PRIVACY"), null);
 });
 
 // ---- end-to-end: /api/enrich with mocked website + Claude --------------------------
@@ -206,6 +377,9 @@ test("e2e: /api/enrich returns HOLD for the Inspire 2 Shine file", async () => {
     assert.equal(rep.site_check.status, "maintenance");
     assert.equal(rep.boardability.verdict, "HOLD");
     assert.equal(rep.payment_risk.classification, "High");
+    assert.deepEqual(rep.vertical_requirements.map((v) => v.id), ["travel"]);
+    assert.ok(rep.vertical_requirements[0].items.some((i) => /Seller of Travel/.test(i)));
+    assert.ok(Array.isArray(rep.risk_observations));
     assert.ok(rep.corepay_fit.score <= 40);
     assert.equal(rep.entity_verification.verified, true);
     assert.ok(rep.company.founded.includes("L24000162168"));

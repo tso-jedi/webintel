@@ -1,4 +1,4 @@
-# Merchant Intel — backend (Deal Desk v3)
+# Merchant Intel — backend (Deal Desk v3.1)
 
 Pulls **real** website/lead data and hands it to the Deal Desk frontend. Vendors and
 direct checks supply the facts; Claude supplies the judgment layer (card-acceptance
@@ -17,6 +17,62 @@ risk, Corepay/Dispu fit, business model, adverse media). **Deterministic rules i
 
 Every source degrades gracefully — a missing key or failed call drops that section, the
 rest still returns, and `_meta.sources_used` reports what actually returned data.
+
+## What changed in v3.1
+
+Seven fixes, all found by the boppythots scan, plus vertical requirement packs.
+
+1. **No application context, no mismatches.** With nothing declared, a declared-vs-observed
+   mismatch cannot exist. The model's `declared: "N/A — no application"` rows are demoted to
+   watchouts instead of driving gates and conditions.
+2. **MCC candidates no longer act like facts.** Only `mcc_guess` (plus a declared `current_mcc`)
+   sets the scheme floor and produces a registration flag. Candidates are listed as alternatives;
+   a high-brand-risk candidate under a non-HBR primary gets one soft "final MCC not settled" note.
+   The model's own wording for the same registration point is de-duplicated.
+3. **Structural risk is split from adverse media.** `adverse_media.flags` now holds only
+   third-party findings (regulator, court, scheme, press). Observations about the merchant's own
+   setup — new entity, missing policies, which gateway it uses — go to the new `risk_observations`.
+   A merchant with a clean record no longer shows FLAGS FOUND in red.
+4. **Evidence citations survive the name filter.** A source that evidenced the registry record or a
+   kept finding is about this merchant by definition, even when its page title never says the name,
+   so the registry record is no longer discarded and no longer docks confidence.
+5. **Registrar parsing fixed.** `Registrar:` is matched at line start, so "Registrar WHOIS Server:"
+   and "Registrar URL:" no longer win; a hostname or REDACTED value is dropped rather than shown.
+6. **DNS provider fixed.** NS1 is only reported for nsone.net, not for any generic `ns1.<host>`.
+7. **Registered agents are not screened.** Northwest Registered Agent, CSC, LegalZoom and the like
+   are service providers, not related parties — excluded from screening and officer cross-checks.
+
+Also: the vertical floor comes from the **declared** business, so a travel-membership file stays
+high risk even while its domain still serves a jewelry store; a guideline reserve replaces any
+reserve percentage the model invented; and a domain-only scan can no longer report high confidence,
+because the tool's main check never ran.
+
+### Vertical requirement packs (`verticals.js`)
+
+Conditions now come from Corepay's own guidelines instead of generic numbers. Each pack carries a
+risk floor, reserve/pricing terms, and the documents Underwriting will ask for. They land in the
+report as `vertical_requirements`, in the routing note, and in the PDF and CSV.
+
+| Pack | Kind | Source |
+|---|---|---|
+| Adult content | primary | Corepay guideline |
+| AI-generated adult content | overlay on adult | Corepay guideline |
+| Research peptides (US) | primary | Corepay guideline |
+| Telehealth / online pharmacy (US) | primary | Corepay guideline |
+| Travel club / membership | primary | Drafted — confirm with Underwriting |
+| Affiliate / MLM business opportunity | overlay | Drafted — confirm with Underwriting |
+| Recurring / negative-option billing | overlay | Drafted — confirm with Underwriting |
+
+Packs marked **Drafted** are assembled from scheme rules and case practice, not from a ratified
+Corepay document — the UI labels them so nobody quotes them as policy by accident. **Edit
+`verticals.js` to change any pack**; the file is plain data with comments and needs no other change.
+
+Startup extras (guardrail attestation, funding proof, business plan, management CVs) fold in
+automatically when there is no processing history to lean on.
+
+The adult-AI pack also carries a prohibition: altering a real person's photo, face or body is a
+no-go (internal rule, 4 Sep 2026). Matching content raises a **blocking** `VERTICAL_PROHIBITED`
+gate so a human decides, rather than an automatic decline that a false positive could trigger.
 
 ## What changed in v3
 
@@ -81,7 +137,8 @@ curl -X POST https://merchant-intel.onrender.com/api/enrich \
 
 All v2 fields keep their shape. Added: `site_check`, `application`, `consistency`
 (`mismatches[]`), `gates[]`, `entity_verification`, `principal_screening[]`,
-`guard_adjustments[]`, `confidence_detail`, `payment_risk.mcc_candidates[]`,
+`guard_adjustments[]`, `confidence_detail`, `risk_observations[]`, `vertical_requirements[]`,
+`payment_risk.mcc_candidates[]`,
 `payment_risk.scheme_registration[]`, `adverse_media.sources_discarded`,
 `adverse_media.flags_discarded_similar_name`, `outreach.suppressed`, `_meta.version`,
 `_meta.cache`. `boardability.verdict` can now also be **`HOLD`**.
@@ -90,6 +147,16 @@ Until the frontend has dedicated panels, the key points are folded into fields i
 already renders: gates and mismatches lead `boardability.conditions`,
 `corepay_fit.watchouts` and the `routing_note` header; the verified entity appears in
 `company.founded`; screening findings appear in `adverse_media.flags`.
+
+## Files
+
+| File | What it is |
+|---|---|
+| `server.js` | HTTP layer, vendor calls, website check, the Claude prompt |
+| `checks.js` | Deterministic rules — gates, mismatches, filters, guards. The model cannot override these |
+| `verticals.js` | **Corepay's underwriting guidelines as data. Edit this when a guideline changes** |
+| `checks.test.js` | 25 tests, including replays of the Inspire 2 Shine and boppythots scans |
+| `merchant-intel.html` | The Deal Desk front end |
 
 ## Setup
 

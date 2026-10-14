@@ -63,3 +63,19 @@ add a 24h per-domain cache in `server.js` (noted in README) so repeat lookups do
    `DEAL_DESK_TOKEN` only after the frontend sends the `x-deal-desk-token` header,
    otherwise every scan returns 401.
 4. Rollback: Render → Deploys → previous deploy → **Rollback**.
+
+## Updating to v3.1
+
+1. Upload `server.js`, `checks.js`, `verticals.js`, `checks.test.js`, `package.json`,
+   `README.md`, `DEPLOY.md` and `merchant-intel.html` to the repo and commit to `main`.
+   `verticals.js` is new — without it the service will not start.
+2. Render auto-deploys. `…/api/health` should report `"version":"3.1.0"`.
+3. Replace your local `merchant-intel.html` with the new one.
+4. No environment variables change in this release.
+
+### Changing an underwriting guideline later
+
+Edit `verticals.js` and commit. Each pack has `floor`, `reserve` and `items`, with a `source`
+line of either "Corepay guideline" or "Drafted — confirm with Underwriting" that the report
+shows beside the pack name. Run `npm test` before pushing if you have Node locally; otherwise
+upload and watch the Render deploy log.

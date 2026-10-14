@@ -101,6 +101,10 @@
   .subj{padding:10px 0;border-bottom:1px solid var(--lineSoft)}
   .subj:last-child{border-bottom:none}
   details.why summary{cursor:pointer;color:var(--muted);font-family:var(--mono);font-size:11px}
+  .pack{border-left:3px solid var(--cyan);padding:2px 0 2px 14px;margin-bottom:16px}
+  .pack:last-child{margin-bottom:0}
+  .pack h4{margin:0 0 4px;font-size:14px;font-weight:700}
+  .srcbadge{font-family:var(--mono);font-size:9px;letter-spacing:.5px;border-radius:4px;padding:2px 6px;border:1px solid;white-space:nowrap}
   details.why ul{margin:8px 0 0;padding-left:18px;color:var(--ink);font-size:12px;line-height:1.6}
   @media (max-width:640px){ .mmtab thead{display:none} .mmtab td{display:block;border-bottom:none;padding:3px 0} .mmtab tr{display:block;border-bottom:1px solid var(--lineSoft);padding:8px 0} .mmtab td[data-l]::before{content:attr(data-l);display:block;font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--muted);margin-top:4px} }
   .modetabs{display:flex;gap:0;margin-top:14px;border-bottom:1px solid var(--line)}
@@ -342,6 +346,30 @@
     const flagged=list.some(x=>(x.findings||[]).length);
     return '<div style="grid-column:1/-1">'+card('Principal & linked-company screening',flagged?'var(--red)':'var(--green)',list.length+' SCREENED',body)+'</div>';
   };
+  const verticalCard = (r)=>{
+    const vs=r.vertical_requirements; if(!vs||!vs.length) return '';
+    const anyDrafted=vs.some(v=>/^Drafted/.test(v.source||''));
+    const body=vs.map(v=>{
+      const drafted=/^Drafted/.test(v.source||'');
+      const col=drafted?'var(--amber)':'var(--green)';
+      return '<div class="pack" style="border-left-color:'+col+'">'+
+        '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px">'+
+          '<h4>'+esc(v.label)+'</h4>'+
+          '<span class="srcbadge" style="color:'+col+';border-color:'+col+'">'+esc(v.source)+'</span>'+
+          (v.kind==='overlay'?'<span style="font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:1px">OVERLAY</span>':'')+
+          '<span style="font-size:11px;color:var(--muted)">matched on '+esc((v.matched_on||[]).join('; '))+'</span>'+
+        '</div>'+
+        (v.reserve?'<p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:'+col+'">'+esc(v.reserve)+'</p>':'')+
+        bullets(v.items,'var(--cyanBright)')+'</div>';
+    }).join('');
+    return '<div style="grid-column:1/-1">'+card('Vertical requirements','var(--cyan)',vs.length+' PACK'+(vs.length>1?'S':''),
+      body+(anyDrafted?'<p style="margin:14px 0 0;font-size:11.5px;color:var(--muted)">Packs marked “Drafted” are not from a ratified Corepay guideline — review them before quoting. Edit verticals.js on the backend to change any pack.</p>':''))+'</div>';
+  };
+  const observationsCard = (r)=>{
+    const obs=r.risk_observations; if(!obs||!obs.length) return '';
+    return '<div style="grid-column:1/-1">'+card('Structural risk observations','var(--amber)',obs.length+' OBSERVED',
+      '<p style="margin:0 0 10px;font-size:12px;color:var(--muted)">About the merchant\u2019s own setup — not third-party adverse media.</p>'+advFlags(obs.map(function(f){return {claim:f.claim,url:f.url,severity:f.severity};})))+'</div>';
+  };
   const confidenceHtml = (r)=>{
     if(!r.confidence) return '';
     const d=r.confidence_detail;
@@ -440,9 +468,11 @@
               '<div class="grp"><div class="gl">VERTICAL FLAGS</div>'+chipsC(r.payment_risk&&r.payment_risk.vertical_flags,rm.c)+'</div></div>'+
               '<div><div class="gl">RATIONALE</div><p style="margin:0;font-size:13px;line-height:1.55">'+esc(r.payment_risk&&r.payment_risk.rationale||'')+'</p></div>'+
             '</div>')+'</div>'+
+          verticalCard(r)+
           screeningCard(r)+
+          observationsCard(r)+
           '<div style="grid-column:1/-1">'+card('Adverse media / compliance scan',(r.adverse_media&&r.adverse_media.flags&&r.adverse_media.flags.length?'var(--red)':'var(--green)'),(r.adverse_media&&r.adverse_media.flags&&r.adverse_media.flags.length?'FLAGS FOUND':'CLEAR'),
-            '<div class="grp" style="margin-top:0"><div class="gl" style="color:var(--amber)">FLAGS</div>'+advFlags(r.adverse_media&&r.adverse_media.flags)+'</div>'+
+            '<div class="grp" style="margin-top:0"><div class="gl" style="color:var(--amber)">THIRD-PARTY ADVERSE FINDINGS</div>'+advFlags(r.adverse_media&&r.adverse_media.flags)+'</div>'+
             '<p class="summary">'+esc(r.adverse_media&&r.adverse_media.summary||'')+'</p>'+
             (r.adverse_media&&r.adverse_media.regulatory?'<div class="grp"><div class="gl">REGULATORY</div><p style="margin:0;font-size:13px;line-height:1.55">'+esc(r.adverse_media.regulatory)+'</p></div>':'')+
             srcList(r.adverse_media&&r.adverse_media.sources)+
@@ -510,8 +540,13 @@
       '<div class="sec">Payment risk</div><div class="meta">MCC guess: '+esc(r.payment_risk&&r.payment_risk.mcc_guess||'—')+' · CB risk: '+esc(r.payment_risk&&r.payment_risk.chargeback_risk||'—')+'</div>'+
       '<div style="font-size:13px;margin-top:4px">Flags: '+list(r.payment_risk&&r.payment_risk.vertical_flags)+'</div>'+
       '<div style="font-size:13px;margin-top:4px;line-height:1.55">'+esc(r.payment_risk&&r.payment_risk.rationale||'')+'</div>'+
+      ((r.vertical_requirements&&r.vertical_requirements.length)?'<div class="sec">Vertical requirements</div>'+
+        r.vertical_requirements.map(function(v){return '<div style="font-size:13px;margin-top:6px;line-height:1.5"><b>'+esc(v.label)+'</b> ('+esc(v.source)+(v.kind==='overlay'?', overlay':'')+')'+
+          (v.reserve?'<div style="font-size:12.5px;margin-top:2px"><b>Reserve/terms:</b> '+esc(v.reserve)+'</div>':'')+
+          '<ol style="margin:4px 0 0 18px;padding:0;font-size:12.5px;line-height:1.5">'+v.items.map(function(i){return '<li>'+esc(i)+'</li>';}).join('')+'</ol></div>';}).join(''):'')+
+      ((r.risk_observations&&r.risk_observations.length)?'<div class="sec">Structural risk observations</div><div style="font-size:13px;line-height:1.5">'+list(r.risk_observations.map(function(f){return (f&&f.claim)||f;}))+'</div>':'')+
       '<div class="sec">Adverse media / compliance</div>'+
-      '<div style="font-size:13px">Flags: '+list((r.adverse_media&&r.adverse_media.flags||[]).map(function(f){return (f&&f.claim)||f;}))+'</div>'+
+      '<div style="font-size:13px">Third-party findings: '+list((r.adverse_media&&r.adverse_media.flags||[]).map(function(f){return (f&&f.claim)||f;}))+'</div>'+
       '<div style="font-size:13px;margin-top:4px;line-height:1.55">'+esc((r.adverse_media&&r.adverse_media.summary)||'')+'</div>'+
       ((r.adverse_media&&r.adverse_media.regulatory)?'<div style="font-size:13px;margin-top:4px;line-height:1.55"><b>Regulatory:</b> '+esc(r.adverse_media.regulatory)+'</div>':'')+
       '<div class="sec">Corepay / Dispu fit</div>'+
@@ -544,6 +579,8 @@
     ((r.consistency&&r.consistency.mismatches)||[]).forEach(function(x){ push('Declared vs observed',x.field+' ('+x.severity+')','declared: '+x.declared+' | observed: '+x.observed+(x.note?' | '+x.note:'')); });
     var sc=r.site_check; if(sc){ push('Website check','Status',sc.status);push('Website check','HTTP',sc.http_status);push('Website check','Evidence',sc.evidence);push('Website check','Platform',sc.platform); }
     var ev=r.entity_verification; if(ev){ push('Legal entity','Verified',ev.verified?'yes':'no');push('Legal entity','Legal name',ev.legal_name);push('Legal entity','Registry ID',ev.registry_id);push('Legal entity','Status',ev.status);push('Legal entity','Formed',ev.formation_date);push('Legal entity','Officers',(ev.officers||[]).map(function(o){return typeof o==='string'?o:o.name;}));push('Legal entity','Source',ev.source_url||ev.source); }
+    (r.vertical_requirements||[]).forEach(function(v){ push('Vertical requirements',v.label+' ('+v.source+')',(v.reserve?'RESERVE/TERMS: '+v.reserve+' | ':'')+v.items.join(' | ')); });
+    (r.risk_observations||[]).forEach(function(f,i){ push('Structural risk','Observation '+(i+1),(f&&f.claim)||f); });
     (r.principal_screening||[]).forEach(function(x){ push('Screening',x.subject,((x.findings||[]).map(function(f){return f.claim+' ['+f.severity+']'+(f.url?' ('+f.url+')':'');}).join(' | '))||'nothing found'); });
     push('Payment risk','MCC candidates',((p.mcc_candidates)||[]).map(function(m){return m.mcc+' '+(m.description||'')+(m.when?' ('+m.when+')':'');}));
     push('Meta','Sources',r.sources);push('Meta','Confidence',r.confidence);
@@ -655,7 +692,7 @@
       '<th onclick="window.MI.bsort(\'risk\')">RISK</th>'+
       '<th onclick="window.MI.bsort(\'fit\')">FIT ▾</th>'+
       '<th onclick="window.MI.bsort(\'board\')">BOARDABILITY</th>'+
-      '<th>FLAGS</th><th>ADVERSE</th><th>STATUS</th></tr>';
+      '<th>FLAGS</th><th>ADVERSE / STRUCTURAL</th><th>STATUS</th></tr>';
     const body=sorted.map((row,idx)=>{
       const r=row.report;
       let risk='—',fit='—',board='—',flags='—',adv='—';
@@ -667,8 +704,9 @@
         const bv=r.boardability&&r.boardability.verdict; const bm=BOARD;
         board=bv?'<span class="bpill" style="color:'+(bm[bv]||'var(--muted)')+';border:1px solid '+(bm[bv]||'var(--muted)')+'">'+esc(bv)+'</span>':'—';
         flags=esc(((r.payment_risk&&r.payment_risk.vertical_flags)||[]).slice(0,3).join(', '))||'—';
-        const ac=(r.adverse_media&&r.adverse_media.flags||[]).length;
-        adv=ac?'<span style="color:var(--red);font-family:var(--mono)">⚑ '+ac+'</span>':'<span style="color:var(--green);font-family:var(--mono)">clear</span>';
+        const ac=(r.adverse_media&&r.adverse_media.flags||[]).length, sc2=(r.risk_observations||[]).length;
+        adv=(ac?'<span style="color:var(--red);font-family:var(--mono)">⚑ '+ac+'</span>':'<span style="color:var(--green);font-family:var(--mono)">clear</span>')+
+            (sc2?'<span style="color:var(--amber);font-family:var(--mono);margin-left:6px" title="structural risk observations">△ '+sc2+'</span>':'');
       }
       const st=row.status==='done'?'<span style="color:var(--green)">✓</span>':row.status==='scanning'?'<span style="color:var(--cyan);animation:pulse 1s infinite">scanning…</span>':row.status==='error'?'<span style="color:var(--red)" title="'+esc(row.error||'')+'">failed</span>':'<span style="color:var(--muted)">queued</span>';
       const click=r?' onclick="window.MI.bview('+row.id+')"':'';
@@ -702,7 +740,7 @@
     $('batchProg').textContent=done+'/'+state.batch.length+' done'+(state.batchStop?' (stopped)':' · complete');
   }
   function batchToCSV(){
-    const rows=[['Domain','Risk','Fit','Boardability','Gates','Website','Vertical flags','Adverse flags','Status']];
+    const rows=[['Domain','Risk','Fit','Boardability','Gates','Website','Vertical packs','Vertical flags','Adverse findings','Structural observations','Status']];
     batchSortRows().forEach(row=>{ const r=row.report;
       rows.push([row.domain,
         r&&r.payment_risk&&r.payment_risk.classification||'',
@@ -710,8 +748,10 @@
         r&&r.boardability&&r.boardability.verdict||'',
         r&&(r.gates||[]).map(g=>g.code).join(' | ')||'',
         r&&r.site_check&&r.site_check.status||'',
+        r&&(r.vertical_requirements||[]).map(v=>v.id).join(' | ')||'',
         r&&r.payment_risk&&(r.payment_risk.vertical_flags||[]).join(' | ')||'',
         r&&r.adverse_media&&(r.adverse_media.flags||[]).length||0,
+        r&&(r.risk_observations||[]).length||0,
         row.status]);
     });
     return rows.map(r=>r.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(',')).join('\r\n');
